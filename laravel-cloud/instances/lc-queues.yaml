@@ -1,5 +1,5 @@
 type: "@craftquest/laravel-cloud/queues"
-typeVersion: 2026.08.10.3
+typeVersion: 2026.08.10.4
 id: 5709e140-10da-4ab9-b7b4-12207470174f
 name: lc-queues
 version: 1

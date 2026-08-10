@@ -395,11 +395,17 @@ async function fetchAndWriteInstance(
  */
 export const model = {
   type: "@craftquest/laravel-cloud/queues",
-  version: "2026.08.10.3",
+  version: "2026.08.10.4",
   upgrades: [
     {
       toVersion: "2026.08.10.3",
       description: "Usage + spend report phase; no schema changes",
+      upgradeAttributes: (old: Record<string, unknown>) => old,
+    },
+    {
+      toVersion: "2026.08.10.4",
+      description:
+        "safe-deploy workflow + run_command fails on nonzero exit + idempotent queue pause/resume; no schema changes",
       upgradeAttributes: (old: Record<string, unknown>) => old,
     },
   ],
@@ -691,8 +697,15 @@ export const model = {
           laravelCloudToken,
           "POST",
           `/instances/${instanceId}/pause`,
-        );
-        context.logger.info("Queue {id} paused", { id: instanceId });
+        ).then(() => {
+          context.logger.info("Queue {id} paused", { id: instanceId });
+        }).catch((err: Error) => {
+          // idempotent: already-paused is success, not failure
+          if (!err.message.includes("already paused")) throw err;
+          context.logger.info("Queue {id} was already paused", {
+            id: instanceId,
+          });
+        });
         return await fetchAndWriteInstance(context, instanceId);
       },
     },
@@ -711,8 +724,18 @@ export const model = {
           laravelCloudToken,
           "POST",
           `/instances/${instanceId}/resume`,
-        );
-        context.logger.info("Queue {id} resumed", { id: instanceId });
+        ).then(() => {
+          context.logger.info("Queue {id} resumed", { id: instanceId });
+        }).catch((err: Error) => {
+          // idempotent: not-paused is success, not failure
+          if (
+            !err.message.includes("not paused") &&
+            !err.message.includes("already running")
+          ) {
+            throw err;
+          }
+          context.logger.info("Queue {id} was not paused", { id: instanceId });
+        });
         return await fetchAndWriteInstance(context, instanceId);
       },
     },

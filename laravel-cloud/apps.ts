@@ -700,7 +700,7 @@ async function fetchAndWriteEnvironment(
 export const model = {
   type: "@craftquest/laravel-cloud/apps",
   reports: ["@craftquest/laravel-cloud-usage"],
-  version: "2026.08.10.3",
+  version: "2026.08.10.4",
   upgrades: [
     {
       toVersion: "2026.08.10.2",
@@ -711,6 +711,12 @@ export const model = {
     {
       toVersion: "2026.08.10.3",
       description: "Usage + spend report phase; no schema changes",
+      upgradeAttributes: (old: Record<string, unknown>) => old,
+    },
+    {
+      toVersion: "2026.08.10.4",
+      description:
+        "safe-deploy workflow + run_command fails on nonzero exit + idempotent queue pause/resume; no schema changes",
       upgradeAttributes: (old: Record<string, unknown>) => old,
     },
   ],
@@ -1456,10 +1462,17 @@ export const model = {
                 updatedAt: new Date().toISOString(),
               },
             );
-            if (a.status === "command.failure") {
-              context.logger.warn(
-                "Command failed (exit {exit}); output stored in commandRun",
-                { exit: a.exit_code ?? "n/a" },
+            // platform quirk: "command.success" means "the command ran";
+            // a nonzero exit code is still a failed command
+            const failed = a.status === "command.failure" ||
+              (a.exit_code != null && a.exit_code !== 0);
+            if (failed) {
+              // output is stored first so it survives the throw; failing
+              // here makes workflow steps fail when the command fails
+              throw new Error(
+                `Command failed (exit ${a.exit_code ?? "n/a"}): ${
+                  String(a.output ?? "").trim().slice(-500)
+                }`,
               );
             }
             return { dataHandles: [handle] };

@@ -771,3 +771,51 @@ Deno.test("get_usage maps the spend summary and breakdowns", async () => {
   // deno-lint-ignore no-explicit-any
   assertEquals((written[0].data.credits as any).totalCents, 2000);
 });
+
+Deno.test("run_command stores output then FAILS when the command fails", async () => {
+  const { context, getWrittenResources } = createModelTestContext({
+    globalArgs: args({ environmentId: "env-1", command: "php artisan boom" }),
+  });
+  await withMockedFetch(
+    [
+      {
+        status: 200,
+        body: {
+          data: {
+            id: "c-2",
+            type: "commands",
+            attributes: { command: "php artisan boom", status: "pending" },
+          },
+        },
+      },
+      {
+        status: 200,
+        body: {
+          data: {
+            id: "c-2",
+            type: "commands",
+            attributes: {
+              command: "php artisan boom",
+              // the REAL platform shape: success status, nonzero exit
+              status: "command.success",
+              exit_code: 1,
+              output: "There are no commands defined in the boom namespace.",
+            },
+          },
+        },
+      },
+    ],
+    async () => {
+      const err = await assertRejects(
+        () => model.methods.run_command.execute({}, context),
+        Error,
+      );
+      assert(err.message.includes("exit 1"));
+      assert(err.message.includes("no commands defined"));
+    },
+  );
+  // the failed run's output was stored BEFORE the throw
+  const written = getWrittenResources();
+  assertEquals(written[0].specName, "commandRun");
+  assertEquals(written[0].data.exitCode, 1);
+});

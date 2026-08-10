@@ -166,11 +166,22 @@ Workflows and other models reference these records with CEL expressions — e.g.
 `data.latest("lc-apps", "deployment").attributes.status` — which is how tools
 compose without re-entering configuration.
 
+## Understanding the extension
+
+The full API of each model — every method, argument, and stored resource, with
+descriptions — is one command away:
+
+```bash
+swamp model type describe "@craftquest/laravel-cloud/apps" --json
+swamp model type describe "@craftquest/laravel-cloud/data" --json
+swamp model type describe "@craftquest/laravel-cloud/queues" --json
+```
+
 ## Workflows
 
-The extension ships a ready-made pipeline, `@craftquest/deploy-laravel`: deploy
-the environment's tracked branch → follow the deployment to completion (failing
-loudly with the reason and log tail) → run the migrations. One command:
+The extension ships two ready-made pipelines. `@craftquest/deploy-laravel`:
+deploy the environment's tracked branch → follow the deployment to completion
+(failing loudly with the reason and log tail) → run the migrations. One command:
 
 ```bash
 swamp workflow run "@craftquest/deploy-laravel" \

@@ -1,0 +1,219 @@
+id: f646109e-2d94-4219-a81d-1dc89f14ce05
+name: "@craftquest/safe-deploy"
+description: Queue-safe deploy — pause the managed queue so no jobs run mid-migration, deploy and follow to completion, run the migrations, then resume the queue
+version: 1
+inputs:
+  properties:
+    queue_instance_id:
+      type: string
+      description: The managed-queue instance ID to pause during the deploy
+    migrate_command:
+      type: string
+      default: "php artisan migrate --force"
+      description: Post-deploy command run in the environment
+    app_id:
+      type: string
+      default: ""
+      description: Target application ID
+    confirm_app_id:
+      type: string
+      default: ""
+      description: Delete safety gate — must exactly equal app_id
+    environment_id:
+      type: string
+      default: ""
+      description: Target environment ID
+    confirm_environment_id:
+      type: string
+      default: ""
+      description: Safety gate for delete_environment / stop_environment (while running)
+    deployment_id:
+      type: string
+      default: ""
+      description: Target deployment ID (empty = the stored deployment)
+    app_name:
+      type: string
+      default: ""
+      description: Application name for create_app
+    repository:
+      type: string
+      default: ""
+      description: Repository for create_app ('owner/name')
+    source_control_provider:
+      type: string
+      default: "github"
+      description: github, gitlab, or bitbucket
+    region:
+      type: string
+      default: "us-east-2"
+      description: Cloud region for create_app
+    root_directory:
+      type: string
+      default: ""
+      description: Monorepo root directory for create_app
+    branch:
+      type: string
+      default: ""
+      description: Git branch for create_environment
+    environment_name:
+      type: string
+      default: ""
+      description: Environment name for create_environment
+    command:
+      type: string
+      default: ""
+      description: Shell/artisan command for run_command
+    env_variables:
+      type: string
+      default: ""
+      description: JSON array of {"key","value"} pairs (values are secrets)
+    env_var_method:
+      type: string
+      default: "set"
+      description: set (update matching keys) or append
+    env_var_keys:
+      type: string
+      default: ""
+      description: JSON array of key names for delete_env_variables
+    domain_name:
+      type: string
+      default: ""
+      description: Domain name for create_domain
+    domain_id:
+      type: string
+      default: ""
+      description: Target domain ID (verify/delete)
+    confirm_domain_id:
+      type: string
+      default: ""
+      description: Delete safety gate — must exactly equal domain_id
+    update_payload:
+      type: string
+      default: ""
+      description: JSON object of fields to change (update_* methods)
+    avatar_path:
+      type: string
+      default: ""
+      description: Local image path for upload_avatar
+    log_query:
+      type: string
+      default: ""
+      description: Search query for get_environment_logs
+    log_type:
+      type: string
+      default: ""
+      description: Log type filter (access, application, exception, system)
+    metrics_period:
+      type: string
+      default: ""
+      description: Metrics period (API default when empty)
+    log_from:
+      type: string
+      default: ""
+      description: Log range start ISO datetime (default one hour ago)
+    log_to:
+      type: string
+      default: ""
+      description: Log range end ISO datetime (default now)
+    instance_id:
+      type: string
+      default: ""
+      description: Target instance ID
+    confirm_instance_id:
+      type: string
+      default: ""
+      description: Safety gate for delete_instance and purge_queue — must exactly equal instance_id
+    job_id:
+      type: string
+      default: ""
+      description: Target failed-job ID
+    confirm_job_id:
+      type: string
+      default: ""
+      description: Delete safety gate — must exactly equal job_id
+    process_id:
+      type: string
+      default: ""
+      description: Target background-process ID
+    confirm_process_id:
+      type: string
+      default: ""
+      description: Delete safety gate — must exactly equal process_id
+    create_payload:
+      type: string
+      default: ""
+      description: JSON object for create_instance / create_background_process
+  required:
+    - environment_id
+    - queue_instance_id
+jobs:
+  - name: deploy
+    description: Pause queue, deploy, migrate, resume
+    steps:
+      - name: pause-queue
+        description: Pause the managed queue so workers don't process jobs mid-deploy
+        task:
+          type: model_method
+          modelIdOrName: lc-queues
+          methodName: pause_queue
+          inputs:
+            instance_id: ${{ inputs.queue_instance_id }}
+      - name: initiate
+        description: Initiate deployment of the environment's tracked branch
+        task:
+          type: model_method
+          modelIdOrName: lc-apps
+          methodName: deploy
+        dependsOn:
+          - step: pause-queue
+            condition:
+              type: completed
+      - name: wait
+        description: Follow the deployment until it succeeds
+        task:
+          type: model_method
+          modelIdOrName: lc-apps
+          methodName: wait_deployment
+        dependsOn:
+          - step: initiate
+            condition:
+              type: completed
+      - name: migrate
+        description: Run the migrations in the freshly deployed environment
+        task:
+          type: model_method
+          modelIdOrName: lc-apps
+          methodName: run_command
+          inputs:
+            command: ${{ inputs.migrate_command }}
+        dependsOn:
+          - step: wait
+            condition:
+              type: completed
+      - name: resume-queue
+        description: Resume the managed queue
+        task:
+          type: model_method
+          modelIdOrName: lc-queues
+          methodName: resume_queue
+          inputs:
+            instance_id: ${{ inputs.queue_instance_id }}
+        dependsOn:
+          - step: migrate
+            condition:
+              type: completed
+  - name: cleanup-on-failure
+    description: The deploy job failed — make sure the queue is never left paused
+    dependsOn:
+      - job: deploy
+        condition:
+          type: failed
+    steps:
+      - name: resume-queue-after-failure
+        description: Failure cleanup — resume the paused managed queue
+        task:
+          type: model_method
+          modelIdOrName: lc-queues
+          methodName: resume_queue
+          inputs:
+            instance_id: ${{ inputs.queue_instance_id }}

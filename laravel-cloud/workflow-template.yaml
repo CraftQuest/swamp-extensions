@@ -1,12 +1,22 @@
-type: "@craftquest/laravel-cloud/apps"
-typeVersion: 2026.08.10.4
-id: 8c99c4d2-fe0e-49da-9d5b-87c1b1e75695
-name: lc-apps
+# Workflow template for @craftquest/laravel-cloud
+#
+# Copy this file into your repo's workflows/ directory as
+# workflow-<uuid>.yaml, set id/name, and add your steps. swamp rule: a
+# workflow that drives the shipped instances must declare ALL of the
+# instance's inputs (the blocks below, with defaults) — your callers then
+# only pass the inputs your workflow actually uses.
+#
+# The blocks below cover lc-apps and the lc-queues-only extras. Driving
+# lc-data too? Copy its properties from instances/lc-data.yaml the same
+# way (skip any input name already present here).
+id: 00000000-0000-0000-0000-000000000000 # replace with any UUID
+name: "my-workflow" # your name
+description: Describe what your workflow does
 version: 1
-tags:
-  project: laravel-cloud
 inputs:
   properties:
+    # --- your own workflow inputs go here ---
+    # --- lc-apps instance inputs (keep all, defaults included) ---
     app_id:
       type: string
       default: ""
@@ -111,33 +121,43 @@ inputs:
       type: string
       default: ""
       description: Log range end ISO datetime (default now)
+    # --- lc-queues-only inputs (drop if you don't drive lc-queues) ---
+    instance_id:
+      type: string
+      default: ""
+      description: Target instance ID
+    confirm_instance_id:
+      type: string
+      default: ""
+      description: Safety gate for delete_instance and purge_queue — must exactly equal instance_id
+    job_id:
+      type: string
+      default: ""
+      description: Target failed-job ID
+    confirm_job_id:
+      type: string
+      default: ""
+      description: Delete safety gate — must exactly equal job_id
+    process_id:
+      type: string
+      default: ""
+      description: Target background-process ID
+    confirm_process_id:
+      type: string
+      default: ""
+      description: Delete safety gate — must exactly equal process_id
+    create_payload:
+      type: string
+      default: ""
+      description: JSON object for create_instance / create_background_process
   required: []
-globalArguments:
-  laravelCloudToken: ${{ vault.get(laravel-cloud-secrets, LARAVEL_CLOUD_TOKEN) }}
-  appId: ${{ inputs.app_id }}
-  confirmAppId: ${{ inputs.confirm_app_id }}
-  environmentId: ${{ inputs.environment_id }}
-  confirmEnvironmentId: ${{ inputs.confirm_environment_id }}
-  deploymentId: ${{ inputs.deployment_id }}
-  appName: ${{ inputs.app_name }}
-  repository: ${{ inputs.repository }}
-  sourceControlProvider: ${{ inputs.source_control_provider }}
-  region: ${{ inputs.region }}
-  rootDirectory: ${{ inputs.root_directory }}
-  branch: ${{ inputs.branch }}
-  environmentName: ${{ inputs.environment_name }}
-  command: ${{ inputs.command }}
-  envVariables: ${{ inputs.env_variables }}
-  envVarMethod: ${{ inputs.env_var_method }}
-  envVarKeys: ${{ inputs.env_var_keys }}
-  domainName: ${{ inputs.domain_name }}
-  domainId: ${{ inputs.domain_id }}
-  confirmDomainId: ${{ inputs.confirm_domain_id }}
-  updatePayload: ${{ inputs.update_payload }}
-  avatarPath: ${{ inputs.avatar_path }}
-  logQuery: ${{ inputs.log_query }}
-  logType: ${{ inputs.log_type }}
-  metricsPeriod: ${{ inputs.metrics_period }}
-  logFrom: ${{ inputs.log_from }}
-  logTo: ${{ inputs.log_to }}
-methods: {}
+jobs:
+  - name: main
+    description: Your steps
+    steps:
+      - name: example
+        description: Each step calls one model method
+        task:
+          type: model_method
+          modelIdOrName: lc-apps
+          methodName: sync_apps

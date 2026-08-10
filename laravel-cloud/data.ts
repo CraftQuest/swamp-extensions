@@ -626,7 +626,7 @@ function requireConfirm(
  */
 export const model = {
   type: "@craftquest/laravel-cloud/data",
-  version: "2026.08.10.3",
+  version: "2026.08.10.4",
   upgrades: [
     {
       toVersion: "2026.08.10.2",
@@ -637,6 +637,12 @@ export const model = {
     {
       toVersion: "2026.08.10.3",
       description: "Usage + spend report phase; no schema changes",
+      upgradeAttributes: (old: Record<string, unknown>) => old,
+    },
+    {
+      toVersion: "2026.08.10.4",
+      description:
+        "safe-deploy workflow + run_command fails on nonzero exit + idempotent queue pause/resume; no schema changes",
       upgradeAttributes: (old: Record<string, unknown>) => old,
     },
   ],

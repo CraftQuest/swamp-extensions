@@ -42,7 +42,12 @@ State lives in per-purpose resources — read with
 
 - Full deploy pipeline in one call: `swamp workflow run
   "@craftquest/deploy-laravel" --input '{"environment_id": "..."}'` —
-  deploy → wait → migrate. Prefer it over hand-chaining the three methods.
+  deploy → wait → migrate. With a managed queue, prefer
+  `@craftquest/safe-deploy` (adds pause/resume around the deploy, and
+  resumes the queue even on failure): pass environment_id +
+  queue_instance_id. Prefer the workflows over hand-chaining methods.
+- run_command (and the workflows' migrate step) FAILS on a nonzero exit
+  code — the failed command's output is stored in commandRun first.
 
 - "What apps / what's deployed?": `sync_apps`, then `get_app` for detail
   (includes the environment list), then read state — don't re-fetch.
@@ -74,6 +79,9 @@ Protocol:
   `create_snapshot` (lc-data) first.
 - Never use run_command to print secrets (env vars, config values,
   database credentials). Command output is stored in plain state.
+- **Failed commands email the organization's members.** Never run a
+  command you expect to fail as a probe, and never retry a failing
+  command in a loop — every failure lands in a human's inbox.
 
 ## Data operations
 
