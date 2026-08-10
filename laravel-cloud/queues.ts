@@ -395,7 +395,14 @@ async function fetchAndWriteInstance(
  */
 export const model = {
   type: "@craftquest/laravel-cloud/queues",
-  version: "2026.08.10.2",
+  version: "2026.08.10.3",
+  upgrades: [
+    {
+      toVersion: "2026.08.10.3",
+      description: "Usage + spend report phase; no schema changes",
+      upgradeAttributes: (old: Record<string, unknown>) => old,
+    },
+  ],
   globalArguments: GlobalArgsSchema,
   resources: {
     instances: {

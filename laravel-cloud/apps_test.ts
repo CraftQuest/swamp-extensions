@@ -712,3 +712,62 @@ Deno.test("list_regions stores the region catalog", async () => {
     "us-east-2",
   );
 });
+
+// --- usage ---
+
+Deno.test("get_usage maps the spend summary and breakdowns", async () => {
+  const { context, getWrittenResources } = createModelTestContext({
+    globalArgs: args({ metricsPeriod: "current" }),
+  });
+  await withMockedFetch(
+    [{
+      status: 200,
+      body: {
+        data: {
+          summary: {
+            current_spend_cents: 1234,
+            credits: { used_cents: 500, total_cents: 2000 },
+            bandwidth: {
+              cost_cents: 0,
+              usage_percentage: 3,
+              allowance_bytes: 1,
+            },
+            alert: { threshold_cents: 5000, remaining_percentage: 75 },
+          },
+          resources: {
+            total_cost_cents: 400,
+            databases: [{ name: "main-db", total_cents: 400 }],
+            caches: [],
+            buckets: [],
+            websockets: [],
+          },
+          addons: {
+            total_cost_cents: 100,
+            items: [{ name: "Extra seats", total_cents: 100 }],
+          },
+          application_totals: {
+            total_cost_cents: 734,
+            application_count: 2,
+            applications: [
+              { name: "craftquest", total_cents: 700 },
+              { name: "sandbox", total_cents: 34 },
+            ],
+          },
+        },
+      },
+    }],
+    async (calls) => {
+      await model.methods.get_usage.execute({}, context);
+      assert(calls[0].url.includes("/usage?period=current"));
+    },
+  );
+  const written = getWrittenResources();
+  assertEquals(written[0].specName, "usage");
+  assertEquals(written[0].data.currentSpendCents, 1234);
+  // deno-lint-ignore no-explicit-any
+  assertEquals((written[0].data.applications as any).length, 2);
+  // deno-lint-ignore no-explicit-any
+  assertEquals((written[0].data.resourceLines as any)[0].kind, "databases");
+  // deno-lint-ignore no-explicit-any
+  assertEquals((written[0].data.credits as any).totalCents, 2000);
+});

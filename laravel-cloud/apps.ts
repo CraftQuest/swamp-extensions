@@ -311,6 +311,40 @@ const RegionsSchema = z.object({
   syncedAt: z.string(),
 });
 
+const UsageSchema = z.object({
+  period: z.string().optional(),
+  environmentId: z.string().optional(),
+  currentSpendCents: z.number(),
+  credits: z
+    .object({ usedCents: z.number(), totalCents: z.number() })
+    .nullable()
+    .optional(),
+  bandwidth: z
+    .object({ costCents: z.number(), usagePercentage: z.number() })
+    .nullable()
+    .optional(),
+  alert: z
+    .object({ thresholdCents: z.number(), remainingPercentage: z.number() })
+    .nullable()
+    .optional(),
+  resourceTotalCents: z.number().optional(),
+  addonTotalCents: z.number().optional(),
+  applicationTotalCents: z.number().optional(),
+  applicationCount: z.number().optional(),
+  applications: z.array(
+    z.object({ name: z.string(), totalCents: z.number() }),
+  ),
+  addons: z.array(z.object({ name: z.string(), totalCents: z.number() })),
+  resourceLines: z.array(
+    z.object({
+      kind: z.string(),
+      name: z.string().optional(),
+      totalCents: z.number().optional(),
+    }),
+  ),
+  syncedAt: z.string(),
+});
+
 const DomainDetailSchema = DomainSummarySchema.extend({
   updatedAt: z.string(),
 });
@@ -665,12 +699,18 @@ async function fetchAndWriteEnvironment(
  */
 export const model = {
   type: "@craftquest/laravel-cloud/apps",
-  version: "2026.08.10.2",
+  reports: ["@craftquest/laravel-cloud-usage"],
+  version: "2026.08.10.3",
   upgrades: [
     {
       toVersion: "2026.08.10.2",
       description:
         "Version bump alongside the new queues model; no schema changes",
+      upgradeAttributes: (old: Record<string, unknown>) => old,
+    },
+    {
+      toVersion: "2026.08.10.3",
+      description: "Usage + spend report phase; no schema changes",
       upgradeAttributes: (old: Record<string, unknown>) => old,
     },
   ],
@@ -762,6 +802,12 @@ export const model = {
       schema: RegionsSchema,
       lifetime: "7d" as const,
       garbageCollection: 3,
+    },
+    usage: {
+      description: "Latest spend/usage pull for the organization",
+      schema: UsageSchema,
+      lifetime: "30d" as const,
+      garbageCollection: 5,
     },
   },
   checks: {
@@ -1961,6 +2007,90 @@ export const model = {
         });
         const handle = await context.writeResource("regions", "regions", {
           regions,
+          syncedAt: new Date().toISOString(),
+        });
+        return { dataHandles: [handle] };
+      },
+    },
+
+    get_usage: {
+      description:
+        "Pull the organization's spend/usage summary (metricsPeriod optional; environmentId optionally narrows to one environment)",
+      arguments: z.object({}),
+      execute: async (_args: unknown, context: Context) => {
+        const { laravelCloudToken, metricsPeriod, environmentId } =
+          context.globalArgs;
+        const params = new URLSearchParams();
+        if (metricsPeriod) params.append("period", metricsPeriod);
+        if (environmentId) params.append("environment", environmentId);
+        const qs = params.toString();
+        const res = await lcApi(
+          laravelCloudToken,
+          "GET",
+          `/usage${qs ? `?${qs}` : ""}`,
+        );
+        const d = res.data ?? {};
+        const summary = d.summary ?? {};
+        const cents = (v: Json): number => Number(v) || 0;
+        const nameOf = (item: Json): string =>
+          String(item?.name ?? item?.label ?? item?.id ?? "unknown");
+        const applications = (d.application_totals?.applications ?? []).map(
+          (a: Json) => ({ name: nameOf(a), totalCents: cents(a?.total_cents) }),
+        );
+        const addons = (d.addons?.items ?? []).map((a: Json) => ({
+          name: nameOf(a),
+          totalCents: cents(a?.total_cents),
+        }));
+        const resourceLines: Json[] = [];
+        for (const kind of ["databases", "caches", "buckets", "websockets"]) {
+          for (const item of d.resources?.[kind] ?? []) {
+            resourceLines.push({
+              kind,
+              name: nameOf(item),
+              totalCents: item?.total_cents !== undefined
+                ? cents(item.total_cents)
+                : undefined,
+            });
+          }
+        }
+        context.logger.info(
+          "Current spend: {dollars} ({apps} application(s))",
+          {
+            dollars: `$${
+              (cents(summary.current_spend_cents) / 100).toFixed(2)
+            }`,
+            apps: d.application_totals?.application_count ?? 0,
+          },
+        );
+        const handle = await context.writeResource("usage", "usage", {
+          period: metricsPeriod || undefined,
+          environmentId: environmentId || undefined,
+          currentSpendCents: cents(summary.current_spend_cents),
+          credits: summary.credits
+            ? {
+              usedCents: cents(summary.credits.used_cents),
+              totalCents: cents(summary.credits.total_cents),
+            }
+            : null,
+          bandwidth: summary.bandwidth
+            ? {
+              costCents: cents(summary.bandwidth.cost_cents),
+              usagePercentage: cents(summary.bandwidth.usage_percentage),
+            }
+            : null,
+          alert: summary.alert
+            ? {
+              thresholdCents: cents(summary.alert.threshold_cents),
+              remainingPercentage: cents(summary.alert.remaining_percentage),
+            }
+            : null,
+          resourceTotalCents: cents(d.resources?.total_cost_cents),
+          addonTotalCents: cents(d.addons?.total_cost_cents),
+          applicationTotalCents: cents(d.application_totals?.total_cost_cents),
+          applicationCount: d.application_totals?.application_count ?? 0,
+          applications,
+          addons,
+          resourceLines,
           syncedAt: new Date().toISOString(),
         });
         return { dataHandles: [handle] };

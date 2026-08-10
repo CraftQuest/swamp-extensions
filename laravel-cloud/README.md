@@ -123,6 +123,15 @@ swamp model method run lc-data create_snapshot \
   --input '{"cluster_id": "<cluster id>", "snapshot_name": "pre-migration-2026-08-10"}'
 ```
 
+The bundled **`@craftquest/laravel-cloud-usage` report** turns any `get_usage`
+pull into a spend digest — headline spend, credit and alert headroom, and
+per-application/resource/add-on cost tables:
+
+```bash
+swamp model method run lc-apps get_usage
+swamp report get @craftquest/laravel-cloud-usage --model lc-apps --markdown
+```
+
 ## Methods (queues model)
 
 | Method                                                                                                                | What it does                                                                |
@@ -233,10 +242,6 @@ from the shipped `deploy-laravel.yaml` and adjust. Use the `swamp` skill or
 Everything in the Laravel Cloud API except these deferred domains: WebSockets,
 usage, and dedicated clusters (plus the legacy Databases endpoints, superseded
 by clusters).
-
-## Roadmap
-
-- Usage + a spend/usage report extension
 
 ## License
 

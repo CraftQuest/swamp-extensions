@@ -148,6 +148,13 @@ running.
 - Discovery before creates: `list_regions`, `list_database_types`,
   `list_cache_types`.
 
+## Spend
+
+- "What is this costing?": `get_usage` (optionally scoped by
+  `environment_id`), then show the digest:
+  `swamp report get @craftquest/laravel-cloud-usage --model lc-apps --markdown`.
+  Surface the alert headroom if one is configured.
+
 ## Troubleshooting
 
 - 401 on `lc-auth`: token missing/expired — re-check pre-flight 1. Tokens
