@@ -44,8 +44,8 @@ Your Laravel apps don't live here — only the machinery does.
    printf '%s' "<your api token>" | swamp vault put laravel-cloud-secrets LARAVEL_CLOUD_TOKEN
    ```
 
-2. Copy the shipped instances into your repo (skip `lc-data` if you only manage
-   apps):
+2. Copy the shipped instances into your repo (skip `lc-data`/`lc-queues` if you
+   don't need them):
 
    ```bash
    mkdir -p "models/@craftquest/laravel-cloud"
@@ -123,6 +123,24 @@ swamp model method run lc-data create_snapshot \
   --input '{"cluster_id": "<cluster id>", "snapshot_name": "pre-migration-2026-08-10"}'
 ```
 
+## Methods (queues model)
+
+| Method                                                                                                                | What it does                                                                |
+| --------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `list_instances` / `get_instance` / `list_instance_sizes`                                                             | Compute/queue instances of an environment; valid sizes by group             |
+| `create_instance` / `update_instance` / `delete_instance`                                                             | Create (JSON `create_payload`) / update / double-gated delete               |
+| `pause_queue` / `resume_queue`                                                                                        | Reversible, ungated — pausing is the safe emergency action                  |
+| `purge_queue`                                                                                                         | Permanently discards ALL pending jobs — gated like a delete                 |
+| `set_default_queue`                                                                                                   | Make a managed queue the default (idempotent)                               |
+| `list_failed_jobs` / `retry_failed_job` / `delete_failed_job`                                                         | Failed-job triage: list (exceptions truncated), ungated retry, gated delete |
+| `list_background_processes` / `create_background_process` / `update_background_process` / `delete_background_process` | Worker/daemon processes on an instance (delete gated)                       |
+
+Managed-queue rules the platform enforces (live-verified): `scaling_type` must
+be `none` (they scale to zero when idle — no `min_replicas`), at most 3 worker
+replicas, creation requires a `background_processes` array (e.g.
+`[{"type": "worker", "processes": 1}]`), and managed-queue workers always have
+exactly one process — scale with replicas, not processes.
+
 ## State: every run leaves records
 
 Each method writes typed resources you can read back — that's how you (and your
@@ -132,6 +150,7 @@ AI agent, and your workflows) answer questions without re-fetching:
 swamp data get lc-apps apps          # the synced app catalog
 swamp data get lc-apps deployment    # the last deployment you touched
 swamp data get lc-data clusters      # the synced cluster catalog
+swamp data get lc-queues failedJobs  # the failed jobs you just listed
 ```
 
 Workflows and other models reference these records with CEL expressions — e.g.
@@ -211,13 +230,12 @@ from the shipped `deploy-laravel.yaml` and adjust. Use the `swamp` skill or
 
 ## Coverage
 
-Everything in the Laravel Cloud API except these deferred domains: instances &
-managed queues, background processes, WebSockets, usage, and dedicated clusters
-(plus the legacy Databases endpoints, superseded by clusters).
+Everything in the Laravel Cloud API except these deferred domains: WebSockets,
+usage, and dedicated clusters (plus the legacy Databases endpoints, superseded
+by clusters).
 
 ## Roadmap
 
-- Queues & instances: pause/resume/purge, failed-job retry
 - Usage + a spend/usage report extension
 
 ## License

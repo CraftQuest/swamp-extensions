@@ -14,9 +14,11 @@ description: >
 
 # Operating @craftquest/laravel-cloud
 
-Two model instances cover one Laravel Cloud organization: `lc-apps`
-(applications, environments, deployments, commands, domains) and `lc-data`
-(database clusters, databases, snapshots/restores, caches, object storage).
+Three model instances cover one Laravel Cloud organization: `lc-apps`
+(applications, environments, deployments, commands, domains), `lc-data`
+(database clusters, databases, snapshots/restores, caches, object
+storage), and `lc-queues` (instances, managed queues, failed jobs,
+background processes).
 State lives in per-purpose resources — read with
 `swamp data get lc-apps <name>` (`apps`, `app`, `environment`,
 `deployment`, `deploymentLogs`, `commandRun`, `domains`) and
@@ -115,6 +117,22 @@ running.
 - Laravel Cloud resources BILL REAL MONEY. Confirm with the user before
   creating clusters, caches, or apps, and state the resource class you're
   about to create.
+
+## Queues and instances
+
+- "The queue is stuck / runaway job": `pause_queue` FIRST (reversible,
+  ungated, instant) — then diagnose with `list_failed_jobs`. Resume when
+  fixed. Never reach for purge as a first move.
+- `purge_queue` permanently discards every pending job — full delete-class
+  gate (confirm + stored list). Never infer the confirmation.
+- Failed jobs: `retry_failed_job` freely (jobs should be idempotent);
+  `delete_failed_job` is gated — it destroys the evidence.
+- Managed-queue platform rules: scaling_type "none", scale-to-zero (no
+  min_replicas), max 3 replicas, creation needs background_processes
+  (e.g. [{"type": "worker", "processes": 1}]), and workers have exactly
+  one process — scale replicas, not processes.
+- Before create_instance, run `list_instance_sizes` (managed queues use
+  the mq.* groups).
 
 ## Settings, history, and observability
 

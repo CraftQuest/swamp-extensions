@@ -626,7 +626,15 @@ function requireConfirm(
  */
 export const model = {
   type: "@craftquest/laravel-cloud/data",
-  version: "2026.08.10.1",
+  version: "2026.08.10.2",
+  upgrades: [
+    {
+      toVersion: "2026.08.10.2",
+      description:
+        "Version bump alongside the new queues model; no schema changes",
+      upgradeAttributes: (old: Record<string, unknown>) => old,
+    },
+  ],
   globalArguments: GlobalArgsSchema,
   resources: {
     clusters: {

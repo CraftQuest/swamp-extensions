@@ -1,0 +1,58 @@
+type: "@craftquest/laravel-cloud/queues"
+typeVersion: 2026.08.10.2
+id: 5709e140-10da-4ab9-b7b4-12207470174f
+name: lc-queues
+version: 1
+tags:
+  project: laravel-cloud
+inputs:
+  properties:
+    environment_id:
+      type: string
+      default: ""
+      description: Target environment ID (list/create instances)
+    instance_id:
+      type: string
+      default: ""
+      description: Target instance ID
+    confirm_instance_id:
+      type: string
+      default: ""
+      description: Safety gate for delete_instance and purge_queue — must exactly equal instance_id
+    job_id:
+      type: string
+      default: ""
+      description: Target failed-job ID
+    confirm_job_id:
+      type: string
+      default: ""
+      description: Delete safety gate — must exactly equal job_id
+    process_id:
+      type: string
+      default: ""
+      description: Target background-process ID
+    confirm_process_id:
+      type: string
+      default: ""
+      description: Delete safety gate — must exactly equal process_id
+    create_payload:
+      type: string
+      default: ""
+      description: JSON object for create_instance / create_background_process
+    update_payload:
+      type: string
+      default: ""
+      description: JSON object of fields to change (update_* methods)
+  required: []
+globalArguments:
+  laravelCloudToken: ${{ vault.get(laravel-cloud-secrets, LARAVEL_CLOUD_TOKEN) }}
+  environmentId: ${{ inputs.environment_id }}
+  instanceId: ${{ inputs.instance_id }}
+  confirmInstanceId: ${{ inputs.confirm_instance_id }}
+  jobId: ${{ inputs.job_id }}
+  confirmJobId: ${{ inputs.confirm_job_id }}
+  processId: ${{ inputs.process_id }}
+  confirmProcessId: ${{ inputs.confirm_process_id }}
+  createPayload: ${{ inputs.create_payload }}
+  updatePayload: ${{ inputs.update_payload }}
+methods: {}
