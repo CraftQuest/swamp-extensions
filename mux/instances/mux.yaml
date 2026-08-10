@@ -1,0 +1,114 @@
+type: "@craftquest/mux"
+typeVersion: 2026.08.09.1
+id: 86ab6441-bd10-4d84-b359-f55700e6bfd1
+name: mux
+version: 1
+tags:
+  project: video
+inputs:
+  properties:
+    asset_id:
+      type: string
+      default: ""
+      description: Target Mux asset ID (get/wait/playback/delete methods)
+    playback_id:
+      type: string
+      default: ""
+      description: Target playback ID (delete_playback_id only)
+    video_url:
+      type: string
+      default: ""
+      description: Source video URL for create_asset
+    playback_policy:
+      type: string
+      default: "public"
+      description: Playback policy (public, signed, or drm) for new assets and playback IDs
+    passthrough:
+      type: string
+      default: ""
+      description: Free-form metadata attached to created assets
+    cors_origin:
+      type: string
+      default: "*"
+      description: CORS origin allowed to PUT to a direct upload URL
+    upload_id:
+      type: string
+      default: ""
+      description: Target direct-upload ID (check_upload only)
+    test_mode:
+      type: boolean
+      default: false
+      description: Create free watermarked test assets (auto-deleted by Mux after 24h)
+    confirm_asset_id:
+      type: string
+      default: ""
+      description: Delete safety gate — must exactly equal asset_id
+    audience:
+      type: string
+      default: "video"
+      description: What a signed token grants (video, thumbnail, gif, storyboard, drm)
+    token_ttl:
+      type: integer
+      default: 3600
+      description: Signed playback token lifetime in seconds
+    confirm_signing_key_id:
+      type: string
+      default: ""
+      description: Revoke safety gate — must exactly equal the stored signing key ID
+    live_stream_id:
+      type: string
+      default: ""
+      description: Target live stream ID (get/complete/reset/delete live-stream methods)
+    confirm_live_stream_id:
+      type: string
+      default: ""
+      description: Safety gate for reset_stream_key and delete_live_stream — must exactly equal live_stream_id
+    latency_mode:
+      type: string
+      default: "standard"
+      description: Live stream latency mode (low, reduced, standard)
+    reconnect_window:
+      type: integer
+      default: 60
+      description: Seconds to wait for an interrupted encoder to reconnect (0-1800)
+    metric_id:
+      type: string
+      default: "views"
+      description: Mux Data metric ID for get_metrics (views, watch_time, viewer_experience_score, ...)
+    timeframe:
+      type: string
+      default: "7:days"
+      description: Analytics window, '<n>:days' or '<n>:hours'
+    group_by:
+      type: string
+      default: ""
+      description: Breakdown dimension for get_metrics (video_title, country, browser, ...)
+    metric_filter:
+      type: string
+      default: ""
+      description: Optional Mux Data filter, 'dimension:value'
+  required: []
+globalArguments:
+  muxTokenId: ${{ vault.get(mux-secrets, MUX_TOKEN_ID) }}
+  muxTokenSecret: ${{ vault.get(mux-secrets, MUX_TOKEN_SECRET) }}
+  assetId: ${{ inputs.asset_id }}
+  playbackId: ${{ inputs.playback_id }}
+  videoUrl: ${{ inputs.video_url }}
+  playbackPolicy: ${{ inputs.playback_policy }}
+  passthrough: ${{ inputs.passthrough }}
+  corsOrigin: ${{ inputs.cors_origin }}
+  uploadId: ${{ inputs.upload_id }}
+  testMode: ${{ inputs.test_mode }}
+  confirmAssetId: ${{ inputs.confirm_asset_id }}
+  audience: ${{ inputs.audience }}
+  tokenTtl: ${{ inputs.token_ttl }}
+  confirmSigningKeyId: ${{ inputs.confirm_signing_key_id }}
+  liveStreamId: ${{ inputs.live_stream_id }}
+  confirmLiveStreamId: ${{ inputs.confirm_live_stream_id }}
+  latencyMode: ${{ inputs.latency_mode }}
+  reconnectWindow: ${{ inputs.reconnect_window }}
+  metricId: ${{ inputs.metric_id }}
+  timeframe: ${{ inputs.timeframe }}
+  groupBy: ${{ inputs.group_by }}
+  metricFilter: ${{ inputs.metric_filter }}
+methods: {}

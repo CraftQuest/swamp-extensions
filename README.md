@@ -1,0 +1,17 @@
+# CraftQuest swamp extensions
+
+Source for the [swamp](https://github.com/swamp-club/swamp) extensions
+published on the swamp registry under the `@craftquest` collective, built
+and maintained by [CraftQuest](https://craftquest.io).
+
+| Extension | What it does | Install |
+| --------- | ------------ | ------- |
+| [`@craftquest/mux`](mux/) | Manage a Mux video library: assets, direct uploads, signed playback for members-only video, live streams, and Mux Data analytics — with confirmation-gated destructive operations and a bundled engagement report. | `swamp extension pull @craftquest/mux` |
+
+Also published under `@craftquest` (source to be added here):
+`@craftquest/craft-starter` (scaffold local Craft CMS 5 + DDEV projects)
+and `@craftquest/craft-server` (provision Craft-ready Hetzner servers).
+
+Each extension directory contains the exact files bundled at publish
+time — the model, its tests, the manifest, the shipped instance
+definition, and the agent skill — under the MIT license.

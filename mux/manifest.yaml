@@ -1,0 +1,27 @@
+manifestVersion: 1
+name: "@craftquest/mux"
+version: "2026.08.09.1"
+repository: "https://github.com/CraftQuest/swamp-extensions"
+description: "Manage a Mux video library from swamp — sync the asset catalog, ingest from URLs or direct uploads, mint playback IDs, and delete assets behind a confirmation gate. Pure HTTPS, credentials from your vault."
+paths:
+  base: manifest
+models:
+  - mux.ts
+reports:
+  - mux_engagement.ts
+skills:
+  - mux
+additionalFiles:
+  - README.md
+  - LICENSE.md
+  - instances/mux.yaml
+platforms:
+  - darwin-aarch64
+  - darwin-x86_64
+  - linux-x86_64
+  - linux-aarch64
+labels:
+  - mux
+  - video
+  - assets
+  - playback
