@@ -1,0 +1,2074 @@
+import { z } from "npm:zod@4";
+
+// --- Schemas ---
+
+const GlobalArgsSchema = z.object({
+  laravelCloudToken: z
+    .string()
+    .default("")
+    .meta({ sensitive: true })
+    .describe("Laravel Cloud API bearer token (vault-supplied, org-scoped)"),
+  clusterId: z
+    .string()
+    .default("")
+    .describe("Target database cluster ID"),
+  confirmClusterId: z
+    .string()
+    .default("")
+    .describe("Delete safety gate: must exactly equal clusterId"),
+  clusterName: z
+    .string()
+    .default("")
+    .describe("Cluster name for create_cluster (lowercase, 3-40 chars)"),
+  databaseType: z
+    .enum([
+      "laravel_mysql_84",
+      "laravel_mysql_8",
+      "aws_rds_mysql_8",
+      "aws_rds_postgres_18",
+      "neon_serverless_postgres_18",
+      "neon_serverless_postgres_17",
+      "neon_serverless_postgres_16",
+    ])
+    .default("laravel_mysql_84")
+    .describe("Database engine for create_cluster"),
+  region: z
+    .string()
+    .default("us-east-2")
+    .describe("Cloud region for create_cluster / create_cache"),
+  clusterConfig: z
+    .string()
+    .default("")
+    .describe(
+      "Optional JSON config object for create_cluster (engine-specific, e.g. Neon compute units)",
+    ),
+  databaseName: z
+    .string()
+    .default("")
+    .describe(
+      "Database (schema) name within a cluster (create/delete_database)",
+    ),
+  confirmDatabaseName: z
+    .string()
+    .default("")
+    .describe("Delete safety gate: must exactly equal databaseName"),
+  snapshotName: z
+    .string()
+    .default("")
+    .describe("Snapshot name for create_snapshot"),
+  snapshotDescription: z
+    .string()
+    .default("")
+    .describe("Optional snapshot description"),
+  snapshotId: z
+    .string()
+    .default("")
+    .describe("Target snapshot ID (delete_snapshot, restore_database source)"),
+  confirmSnapshotId: z
+    .string()
+    .default("")
+    .describe("Delete safety gate: must exactly equal snapshotId"),
+  restoreName: z
+    .string()
+    .default("")
+    .describe(
+      "Name of the NEW database created by restore_database (restores never overwrite in place)",
+    ),
+  restoreTime: z
+    .string()
+    .default("")
+    .describe(
+      "Point-in-time to restore to (ISO datetime); mutually exclusive with snapshotId",
+    ),
+  cacheId: z
+    .string()
+    .default("")
+    .describe("Target cache ID"),
+  confirmCacheId: z
+    .string()
+    .default("")
+    .describe("Delete safety gate: must exactly equal cacheId"),
+  cacheName: z
+    .string()
+    .default("")
+    .describe("Cache name for create_cache (lowercase, 3-40 chars)"),
+  cacheType: z
+    .enum([
+      "laravel_valkey",
+      "upstash_redis",
+      "aws_elasticache_valkey",
+      "aws_elasticache_redis",
+    ])
+    .default("laravel_valkey")
+    .describe("Cache engine for create_cache"),
+  cacheSize: z
+    .string()
+    .default("valkey-flex-250mb")
+    .describe(
+      "Cache size for create_cache — size values are engine-specific (run list_cache_types); laravel_valkey uses valkey-flex-*/valkey-pro.*, upstash_redis uses 250mb/1gb/...",
+    ),
+  cachePublic: z
+    .boolean()
+    .default(false)
+    .describe("Whether the cache is publicly reachable"),
+  bucketId: z
+    .string()
+    .default("")
+    .describe("Target object storage bucket ID"),
+  confirmBucketId: z
+    .string()
+    .default("")
+    .describe("Delete safety gate: must exactly equal bucketId"),
+  bucketName: z
+    .string()
+    .default("")
+    .describe("Bucket name for create_bucket (lowercase, 3-40 chars)"),
+  bucketVisibility: z
+    .enum(["private", "public"])
+    .default("private")
+    .describe("Bucket visibility for create_bucket"),
+  bucketJurisdiction: z
+    .enum(["default", "eu"])
+    .default("default")
+    .describe("Bucket data jurisdiction for create_bucket"),
+  bucketKeyName: z
+    .string()
+    .default("")
+    .describe("Access key name for create_bucket_key"),
+  bucketKeyPermission: z
+    .enum(["read_write", "read_only"])
+    .default("read_write")
+    .describe("Access key permission for create_bucket_key"),
+  bucketKeyId: z
+    .string()
+    .default("")
+    .describe("Target bucket access key ID (delete_bucket_key)"),
+  confirmBucketKeyId: z
+    .string()
+    .default("")
+    .describe("Delete safety gate: must exactly equal bucketKeyId"),
+  updatePayload: z
+    .string()
+    .default("")
+    .meta({ sensitive: true })
+    .describe(
+      "JSON object of fields to change, passed through to the update_* methods (see the Laravel Cloud API docs for valid fields per resource)",
+    ),
+  metricsPeriod: z
+    .string()
+    .default("")
+    .describe("Metrics period for get_*_metrics (API default when empty)"),
+});
+
+const ClusterSummarySchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  engine: z.string(),
+  status: z.string(),
+  region: z.string().optional(),
+  createdAt: z.string().optional(),
+});
+
+const ClustersSchema = z.object({
+  clusters: z.array(ClusterSummarySchema),
+  clusterCount: z.number(),
+  syncedAt: z.string(),
+});
+
+const ClusterSchema = ClusterSummarySchema.extend({
+  hostname: z.string().optional(),
+  port: z.number().optional(),
+  protocol: z.string().optional(),
+  updatedAt: z.string(),
+});
+
+const DatabasesSchema = z.object({
+  clusterId: z.string(),
+  databases: z.array(
+    z.object({
+      id: z.string().optional(),
+      name: z.string(),
+      status: z.string().optional(),
+      createdAt: z.string().optional(),
+    }),
+  ),
+  databaseCount: z.number(),
+  syncedAt: z.string(),
+});
+
+const SnapshotsSchema = z.object({
+  clusterId: z.string(),
+  snapshots: z.array(
+    z.object({
+      id: z.string(),
+      name: z.string(),
+      description: z.string().nullable().optional(),
+      status: z.string().optional(),
+      storageBytes: z.number().nullable().optional(),
+      completedAt: z.string().nullable().optional(),
+      createdAt: z.string().optional(),
+    }),
+  ),
+  snapshotCount: z.number(),
+  syncedAt: z.string(),
+});
+
+const CacheSummarySchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  engine: z.string(),
+  status: z.string(),
+  region: z.string().optional(),
+  size: z.string().optional(),
+  createdAt: z.string().optional(),
+});
+
+const CachesSchema = z.object({
+  caches: z.array(CacheSummarySchema),
+  cacheCount: z.number(),
+  syncedAt: z.string(),
+});
+
+const CacheTypesSchema = z.object({
+  types: z.array(
+    z.object({
+      type: z.string(),
+      label: z.string().optional(),
+      sizes: z.array(z.string()),
+      regions: z.array(z.string()),
+    }),
+  ),
+  syncedAt: z.string(),
+});
+
+const CacheSchema = CacheSummarySchema.extend({
+  isPublic: z.boolean().optional(),
+  usesHibernation: z.boolean().optional(),
+  hostname: z.string().nullable().optional(),
+  port: z.number().nullable().optional(),
+  updatedAt: z.string(),
+});
+
+const BucketSummarySchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  status: z.string().optional(),
+  visibility: z.string().optional(),
+  createdAt: z.string().optional(),
+});
+
+const BucketsSchema = z.object({
+  buckets: z.array(BucketSummarySchema),
+  bucketCount: z.number(),
+  syncedAt: z.string(),
+});
+
+const BucketSchema = BucketSummarySchema.extend({
+  jurisdiction: z.string().optional(),
+  endpoint: z.string().nullable().optional(),
+  url: z.string().nullable().optional(),
+  updatedAt: z.string(),
+});
+
+const BucketKeySchema = z.object({
+  id: z.string(),
+  bucketId: z.string(),
+  name: z.string(),
+  permission: z.string(),
+  accessKeyId: z
+    .string()
+    .meta({ sensitive: true })
+    .describe("S3-style access key ID (vault-stored)"),
+  accessKeySecret: z
+    .string()
+    .meta({ sensitive: true })
+    .describe("S3-style secret (vault-stored; shown by the API only once)"),
+  createdAt: z.string(),
+});
+
+const MetricSeriesSchema = z.object({
+  name: z.string(),
+  labels: z.array(z.string()),
+  average: z.array(z.number()),
+  pointCount: z.number(),
+});
+
+const DataMetricsSchema = z.object({
+  targetId: z.string(),
+  period: z.string().optional(),
+  series: z.array(MetricSeriesSchema),
+  syncedAt: z.string(),
+});
+
+const DatabaseTypesSchema = z.object({
+  types: z.array(
+    z.object({
+      type: z.string(),
+      label: z.string().optional(),
+      regions: z.array(z.string()),
+    }),
+  ),
+  syncedAt: z.string(),
+});
+
+const SnapshotDetailSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string().nullable().optional(),
+  status: z.string().optional(),
+  storageBytes: z.number().nullable().optional(),
+  completedAt: z.string().nullable().optional(),
+  createdAt: z.string().optional(),
+  updatedAt: z.string(),
+});
+
+const SchemaDetailSchema = z.object({
+  id: z.string().optional(),
+  clusterId: z.string(),
+  name: z.string(),
+  status: z.string().optional(),
+  createdAt: z.string().optional(),
+  updatedAt: z.string(),
+});
+
+const BucketKeyInfoSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  permission: z.string().optional(),
+  createdAt: z.string().optional(),
+  updatedAt: z.string(),
+});
+
+const BucketKeysSchema = z.object({
+  bucketId: z.string(),
+  keys: z.array(
+    z.object({
+      id: z.string(),
+      name: z.string(),
+      permission: z.string().optional(),
+      createdAt: z.string().optional(),
+    }),
+  ),
+  keyCount: z.number(),
+  syncedAt: z.string(),
+});
+
+type ClustersData = z.infer<typeof ClustersSchema>;
+type DatabasesData = z.infer<typeof DatabasesSchema>;
+type SnapshotsData = z.infer<typeof SnapshotsSchema>;
+type CachesData = z.infer<typeof CachesSchema>;
+type BucketsData = z.infer<typeof BucketsSchema>;
+type BucketKeysData = z.infer<typeof BucketKeysSchema>;
+
+// deno-lint-ignore no-explicit-any
+type Context = any;
+// deno-lint-ignore no-explicit-any
+type Json = any;
+
+// --- Helpers ---
+
+const LC_API_BASE = "https://cloud.laravel.com/api";
+const SYNC_MAX_PAGES = 100;
+
+/**
+ * Pause execution for the given number of milliseconds.
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Call the Laravel Cloud API with bearer auth and return the parsed JSON
+ * body. Retries once on 429 (honoring Retry-After) and on 5xx. Errors carry
+ * the HTTP status and truncated response body — never the token. With
+ * `allowNotFound`, a 404 returns null (for idempotent deletes).
+ */
+async function lcApi(
+  token: string,
+  method: string,
+  path: string,
+  body?: unknown,
+  opts: { allowNotFound?: boolean } = {},
+): Promise<Json> {
+  if (!token) {
+    throw new Error(
+      "laravelCloudToken is empty — check the vault wiring for LARAVEL_CLOUD_TOKEN.",
+    );
+  }
+  const url = path.startsWith("https://") ? path : `${LC_API_BASE}${path}`;
+
+  for (let attempt = 1;; attempt++) {
+    const res = await fetch(url, {
+      method,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    const text = await res.text();
+
+    if (res.ok) {
+      return text ? JSON.parse(text) : {};
+    }
+    if (res.status === 404 && opts.allowNotFound) {
+      return null;
+    }
+    const retryable = res.status === 429 || res.status >= 500;
+    if (retryable && attempt === 1) {
+      const retryAfter = Number(res.headers.get("Retry-After")) || 2;
+      await sleep(retryAfter * 1000);
+      continue;
+    }
+    throw new Error(
+      `Laravel Cloud API ${method} ${path} failed (${res.status}): ${
+        text.slice(0, 500)
+      }`,
+    );
+  }
+}
+
+/**
+ * Walk a paginated JSON:API list endpoint to completion via `links.next`.
+ */
+async function lcPaginate(
+  token: string,
+  path: string,
+  context: Context,
+): Promise<Json[]> {
+  const items: Json[] = [];
+  let next: string | null = path;
+  for (let page = 1; page <= SYNC_MAX_PAGES && next; page++) {
+    const res: Json = await lcApi(token, "GET", next);
+    items.push(...(res.data ?? []));
+    next = res.links?.next ?? null;
+    if (page === SYNC_MAX_PAGES && next) {
+      context.logger.warn(
+        "Stopped at page cap ({cap}); catalog may be incomplete",
+        { cap: SYNC_MAX_PAGES },
+      );
+    }
+  }
+  return items;
+}
+
+/**
+ * Map a cluster resource to the catalog summary. The `connection` attribute
+ * (which contains credentials) is never read here.
+ */
+function toClusterSummary(raw: Json): z.infer<typeof ClusterSummarySchema> {
+  const a = raw.attributes ?? {};
+  return {
+    id: raw.id,
+    name: a.name,
+    engine: a.type,
+    status: a.status,
+    region: a.region ?? undefined,
+    createdAt: a.created_at ?? undefined,
+  };
+}
+
+/**
+ * Map a cluster resource to the detail shape. From `connection`, only the
+ * non-secret hostname/port/protocol are kept — username and password are
+ * deliberately never stored.
+ */
+function toClusterDetail(raw: Json): z.infer<typeof ClusterSchema> {
+  const c = raw.attributes?.connection ?? {};
+  return {
+    ...toClusterSummary(raw),
+    hostname: c.hostname ?? undefined,
+    port: c.port ?? undefined,
+    protocol: c.protocol ?? undefined,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Map a cache resource to the catalog summary (no connection data).
+ */
+function toCacheSummary(raw: Json): z.infer<typeof CacheSummarySchema> {
+  const a = raw.attributes ?? {};
+  return {
+    id: raw.id,
+    name: a.name,
+    engine: a.type,
+    status: a.status,
+    region: a.region ?? undefined,
+    size: a.size ?? undefined,
+    createdAt: a.created_at ?? undefined,
+  };
+}
+
+/**
+ * Map a cache resource to the detail shape — connection credentials
+ * (username/password) are deliberately never stored, only hostname/port.
+ */
+function toCacheDetail(raw: Json): z.infer<typeof CacheSchema> {
+  const a = raw.attributes ?? {};
+  const c = a.connection ?? {};
+  return {
+    ...toCacheSummary(raw),
+    isPublic: a.is_public ?? undefined,
+    usesHibernation: a.uses_hibernation ?? undefined,
+    hostname: c.hostname ?? null,
+    port: c.port ?? null,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Map a bucket resource to the catalog summary.
+ */
+function toBucketSummary(raw: Json): z.infer<typeof BucketSummarySchema> {
+  const a = raw.attributes ?? {};
+  return {
+    id: raw.id,
+    name: a.name,
+    status: a.status ?? undefined,
+    visibility: a.visibility ?? undefined,
+    createdAt: a.created_at ?? undefined,
+  };
+}
+
+/**
+ * Assert a response carries a `data` payload and return it.
+ */
+function requireData(res: Json, what: string): Json {
+  if (!res?.data) {
+    throw new Error(
+      `Laravel Cloud API response for ${what} had no data payload.`,
+    );
+  }
+  return res.data;
+}
+
+/**
+ * Require a non-empty global argument, with a method-specific error message.
+ */
+function requireArg(value: string, name: string, method: string): string {
+  if (!value) {
+    throw new Error(`${method} requires the '${name}' argument to be set.`);
+  }
+  return value;
+}
+
+/**
+ * Parse the updatePayload argument into a non-empty JSON object.
+ */
+function parseUpdatePayload(value: string, method: string): Json {
+  requireArg(value, "updatePayload", method);
+  let parsed: Json;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new Error(
+      `${method}: 'updatePayload' must be a JSON object (parse failed).`,
+    );
+  }
+  if (
+    typeof parsed !== "object" || parsed === null || Array.isArray(parsed) ||
+    Object.keys(parsed).length === 0
+  ) {
+    throw new Error(
+      `${method}: 'updatePayload' must be a non-empty JSON object.`,
+    );
+  }
+  return parsed;
+}
+
+/**
+ * Summarize the API's named metric series into a compact, schema-stable
+ * shape: series name, labels, averages, and the number of data points.
+ */
+function summarizeMetrics(
+  data: Json,
+): { name: string; labels: string[]; average: number[]; pointCount: number }[] {
+  return Object.entries(data ?? {}).map(([name, s]: [string, Json]) => ({
+    name,
+    labels: (s?.labels ?? []).map(String),
+    average: (s?.average ?? []).map((n: Json) => Number(n) || 0),
+    pointCount: (s?.data ?? []).length,
+  }));
+}
+
+/**
+ * Enforce the confirm-gate: the confirmation must exactly equal the target.
+ */
+function requireConfirm(
+  target: string,
+  confirm: string,
+  confirmName: string,
+  what: string,
+): void {
+  if (confirm !== target) {
+    throw new Error(
+      `Refused: ${confirmName} does not match. Re-state the exact ${what} to confirm — this operation is destructive.`,
+    );
+  }
+}
+
+// --- Model ---
+
+/**
+ * Operates Laravel Cloud data services: database clusters and their
+ * databases, snapshots and restores, caches, and object storage buckets
+ * with access keys.
+ *
+ * Part of @craftquest/laravel-cloud (data domain). Auth is an org-scoped
+ * bearer token supplied via a vault expression. Connection credentials
+ * returned by the API (database/cache usernames and passwords) are never
+ * stored — only hostnames and ports. Bucket access keys go straight to the
+ * vault via sensitive resource fields. Every delete is double-gated
+ * (exact-ID confirmation + presence in synced state), and restores create
+ * NEW databases — they never overwrite in place.
+ */
+export const model = {
+  type: "@craftquest/laravel-cloud/data",
+  version: "2026.08.10.1",
+  globalArguments: GlobalArgsSchema,
+  resources: {
+    clusters: {
+      description: "Synced database cluster catalog",
+      schema: ClustersSchema,
+      lifetime: "infinite" as const,
+      garbageCollection: 10,
+    },
+    cluster: {
+      description:
+        "Most recently touched cluster (hostname/port only — never credentials)",
+      schema: ClusterSchema,
+      lifetime: "infinite" as const,
+      garbageCollection: 5,
+    },
+    databases: {
+      description: "Databases in the most recently listed cluster",
+      schema: DatabasesSchema,
+      lifetime: "infinite" as const,
+      garbageCollection: 5,
+    },
+    snapshots: {
+      description: "Snapshots of the most recently listed cluster",
+      schema: SnapshotsSchema,
+      lifetime: "infinite" as const,
+      garbageCollection: 5,
+    },
+    caches: {
+      description: "Synced cache catalog",
+      schema: CachesSchema,
+      lifetime: "infinite" as const,
+      garbageCollection: 10,
+    },
+    cacheTypes: {
+      description: "Available cache engines with their valid sizes and regions",
+      schema: CacheTypesSchema,
+      lifetime: "7d" as const,
+      garbageCollection: 3,
+    },
+    cache: {
+      description:
+        "Most recently touched cache (hostname/port only — never credentials)",
+      schema: CacheSchema,
+      lifetime: "infinite" as const,
+      garbageCollection: 5,
+    },
+    buckets: {
+      description: "Synced object storage bucket catalog",
+      schema: BucketsSchema,
+      lifetime: "infinite" as const,
+      garbageCollection: 10,
+    },
+    bucket: {
+      description: "Most recently touched bucket",
+      schema: BucketSchema,
+      lifetime: "infinite" as const,
+      garbageCollection: 5,
+    },
+    bucketKey: {
+      description:
+        "Most recently created bucket access key: ID/secret vault-referenced",
+      schema: BucketKeySchema,
+      vaultName: "laravel-cloud-secrets",
+      lifetime: "infinite" as const,
+      garbageCollection: 5,
+    },
+    bucketKeys: {
+      description:
+        "Access keys of the most recently listed bucket (names only, no secrets)",
+      schema: BucketKeysSchema,
+      lifetime: "infinite" as const,
+      garbageCollection: 5,
+    },
+    bucketKeyInfo: {
+      description:
+        "Most recently inspected access key (metadata only, no secrets)",
+      schema: BucketKeyInfoSchema,
+      lifetime: "infinite" as const,
+      garbageCollection: 3,
+    },
+    clusterMetrics: {
+      description: "Metrics snapshot for the most recently inspected cluster",
+      schema: DataMetricsSchema,
+      lifetime: "7d" as const,
+      garbageCollection: 3,
+    },
+    cacheMetrics: {
+      description: "Metrics snapshot for the most recently inspected cache",
+      schema: DataMetricsSchema,
+      lifetime: "7d" as const,
+      garbageCollection: 3,
+    },
+    databaseTypes: {
+      description: "Available database engines with their regions",
+      schema: DatabaseTypesSchema,
+      lifetime: "7d" as const,
+      garbageCollection: 3,
+    },
+    snapshot: {
+      description: "Most recently inspected snapshot",
+      schema: SnapshotDetailSchema,
+      lifetime: "30d" as const,
+      garbageCollection: 3,
+    },
+    schema: {
+      description: "Most recently inspected database (schema)",
+      schema: SchemaDetailSchema,
+      lifetime: "infinite" as const,
+      garbageCollection: 3,
+    },
+  },
+  checks: {
+    "lc-credentials": {
+      description: "Verify the Laravel Cloud token is wired in from the vault",
+      execute: (context: Context) => {
+        return Promise.resolve(
+          context.globalArgs.laravelCloudToken ? { pass: true } : {
+            pass: false,
+            errors: ["laravelCloudToken is empty — check the vault wiring."],
+          },
+        );
+      },
+    },
+    "lc-auth": {
+      description: "Verify the token authenticates (1 cheap API call)",
+      labels: ["live"],
+      execute: async (context: Context) => {
+        const { laravelCloudToken } = context.globalArgs;
+        if (!laravelCloudToken) {
+          return {
+            pass: false,
+            errors: ["Token empty; see lc-credentials check."],
+          };
+        }
+        try {
+          await lcApi(laravelCloudToken, "GET", "/meta/organization");
+          return { pass: true };
+        } catch (err) {
+          return {
+            pass: false,
+            errors: [
+              `Laravel Cloud authentication failed: ${(err as Error).message}`,
+            ],
+          };
+        }
+      },
+    },
+  },
+  methods: {
+    sync_clusters: {
+      description:
+        "Sync the database cluster catalog into the clusters resource (paginates to completion)",
+      arguments: z.object({}),
+      execute: async (_args: unknown, context: Context) => {
+        const { laravelCloudToken } = context.globalArgs;
+        context.logger.info("Syncing the database cluster catalog");
+        const items = await lcPaginate(
+          laravelCloudToken,
+          "/databases/clusters",
+          context,
+        );
+        const clusters = items.map(toClusterSummary);
+        context.logger.info("Catalog synced: {count} cluster(s)", {
+          count: clusters.length,
+        });
+        const handle = await context.writeResource("clusters", "clusters", {
+          clusters,
+          clusterCount: clusters.length,
+          syncedAt: new Date().toISOString(),
+        });
+        return { dataHandles: [handle] };
+      },
+    },
+
+    get_cluster: {
+      description:
+        "Fetch one cluster's detail (clusterId argument) — hostname/port only, never credentials",
+      arguments: z.object({}),
+      execute: async (_args: unknown, context: Context) => {
+        const { laravelCloudToken } = context.globalArgs;
+        const clusterId = requireArg(
+          context.globalArgs.clusterId,
+          "clusterId",
+          "get_cluster",
+        );
+        const res = await lcApi(
+          laravelCloudToken,
+          "GET",
+          `/databases/clusters/${clusterId}`,
+        );
+        const data = requireData(res, `cluster ${clusterId}`);
+        context.logger.info("Fetched cluster {name} (status: {status})", {
+          name: data.attributes?.name,
+          status: data.attributes?.status,
+        });
+        const handle = await context.writeResource(
+          "cluster",
+          "cluster",
+          toClusterDetail(data),
+        );
+        return { dataHandles: [handle] };
+      },
+    },
+
+    create_cluster: {
+      description:
+        "Create a database cluster (clusterName/databaseType/region arguments; clusterConfig for engine-specific settings)",
+      arguments: z.object({}),
+      execute: async (_args: unknown, context: Context) => {
+        const {
+          laravelCloudToken,
+          clusterName,
+          databaseType,
+          region,
+          clusterConfig,
+        } = context.globalArgs;
+        requireArg(clusterName, "clusterName", "create_cluster");
+
+        let config: Json = undefined;
+        if (clusterConfig) {
+          try {
+            config = JSON.parse(clusterConfig);
+          } catch {
+            throw new Error(
+              "create_cluster: 'clusterConfig' must be a JSON object (parse failed).",
+            );
+          }
+        }
+        const res = await lcApi(
+          laravelCloudToken,
+          "POST",
+          "/databases/clusters",
+          {
+            type: databaseType,
+            name: clusterName,
+            region,
+            ...(config !== undefined ? { config } : {}),
+          },
+        );
+        const data = requireData(res, "created cluster");
+        context.logger.info("Created cluster {name} ({id}, {engine})", {
+          name: clusterName,
+          id: data.id,
+          engine: databaseType,
+        });
+        const handle = await context.writeResource(
+          "cluster",
+          "cluster",
+          toClusterDetail(data),
+        );
+        return { dataHandles: [handle] };
+      },
+    },
+
+    delete_cluster: {
+      description:
+        "Permanently delete a cluster and every database in it. Gated: confirmClusterId must equal clusterId, and the cluster must exist in the synced catalog.",
+      arguments: z.object({}),
+      execute: async (_args: unknown, context: Context) => {
+        const { laravelCloudToken, clusterId, confirmClusterId } =
+          context.globalArgs;
+        requireArg(clusterId, "clusterId", "delete_cluster");
+        requireConfirm(
+          clusterId,
+          confirmClusterId,
+          "confirmClusterId",
+          "cluster ID",
+        );
+        const catalog = (await context.readResource!("clusters")) as
+          | ClustersData
+          | null;
+        const known = catalog?.clusters?.find((c) => c.id === clusterId);
+        if (!known) {
+          throw new Error(
+            `Delete refused: cluster ${clusterId} is not in the synced catalog. ` +
+              "Run sync_clusters first — deletes are only allowed against known clusters.",
+          );
+        }
+        const res = await lcApi(
+          laravelCloudToken,
+          "DELETE",
+          `/databases/clusters/${clusterId}`,
+          undefined,
+          { allowNotFound: true },
+        );
+        if (res === null) {
+          context.logger.warn("Cluster {id} was already gone", {
+            id: clusterId,
+          });
+        } else {
+          context.logger.info("Deleted cluster {name} ({id})", {
+            name: known.name,
+            id: clusterId,
+          });
+        }
+        const remaining = catalog!.clusters.filter((c) => c.id !== clusterId);
+        const handle = await context.writeResource("clusters", "clusters", {
+          clusters: remaining,
+          clusterCount: remaining.length,
+          syncedAt: catalog!.syncedAt,
+        });
+        return { dataHandles: [handle] };
+      },
+    },
+
+    list_databases: {
+      description: "List the databases in a cluster (clusterId argument)",
+      arguments: z.object({}),
+      execute: async (_args: unknown, context: Context) => {
+        const { laravelCloudToken } = context.globalArgs;
+        const clusterId = requireArg(
+          context.globalArgs.clusterId,
+          "clusterId",
+          "list_databases",
+        );
+        const items = await lcPaginate(
+          laravelCloudToken,
+          `/databases/clusters/${clusterId}/databases`,
+          context,
+        );
+        const databases = items.map((d: Json) => ({
+          id: d.id ?? undefined,
+          name: d.attributes?.name ?? d.id,
+          status: d.attributes?.status ?? undefined,
+          createdAt: d.attributes?.created_at ?? undefined,
+        }));
+        context.logger.info("Cluster {id} has {count} database(s)", {
+          id: clusterId,
+          count: databases.length,
+        });
+        const handle = await context.writeResource("databases", "databases", {
+          clusterId,
+          databases,
+          databaseCount: databases.length,
+          syncedAt: new Date().toISOString(),
+        });
+        return { dataHandles: [handle] };
+      },
+    },
+
+    create_database: {
+      description:
+        "Create a database (schema) in a cluster (clusterId + databaseName arguments)",
+      arguments: z.object({}),
+      execute: async (_args: unknown, context: Context) => {
+        const { laravelCloudToken, databaseName } = context.globalArgs;
+        const clusterId = requireArg(
+          context.globalArgs.clusterId,
+          "clusterId",
+          "create_database",
+        );
+        requireArg(databaseName, "databaseName", "create_database");
+        await lcApi(
+          laravelCloudToken,
+          "POST",
+          `/databases/clusters/${clusterId}/databases`,
+          { name: databaseName },
+        );
+        context.logger.info("Created database {name} in cluster {id}", {
+          name: databaseName,
+          id: clusterId,
+        });
+        const stored = (await context.readResource!("databases")) as
+          | DatabasesData
+          | null;
+        const databases = [
+          ...(stored?.clusterId === clusterId ? stored.databases : []),
+          { name: databaseName, status: "creating" },
+        ];
+        const handle = await context.writeResource("databases", "databases", {
+          clusterId,
+          databases,
+          databaseCount: databases.length,
+          syncedAt: new Date().toISOString(),
+        });
+        return { dataHandles: [handle] };
+      },
+    },
+
+    delete_database: {
+      description:
+        "Permanently delete a database (schema) and its data. Gated: confirmDatabaseName must equal databaseName, and the database must be in the stored list (run list_databases first).",
+      arguments: z.object({}),
+      execute: async (_args: unknown, context: Context) => {
+        const { laravelCloudToken, databaseName, confirmDatabaseName } =
+          context.globalArgs;
+        const clusterId = requireArg(
+          context.globalArgs.clusterId,
+          "clusterId",
+          "delete_database",
+        );
+        requireArg(databaseName, "databaseName", "delete_database");
+        requireConfirm(
+          databaseName,
+          confirmDatabaseName,
+          "confirmDatabaseName",
+          "database name",
+        );
+        const stored = (await context.readResource!("databases")) as
+          | DatabasesData
+          | null;
+        const known = (stored?.clusterId === clusterId || undefined) &&
+          stored!.databases.find((d) => d.name === databaseName);
+        if (!known) {
+          throw new Error(
+            `Delete refused: database '${databaseName}' is not in the stored list for cluster ${clusterId}. ` +
+              "Run list_databases first.",
+          );
+        }
+        if (!known.id) {
+          throw new Error(
+            `Delete refused: no schema ID recorded for '${databaseName}' — re-run list_databases (the API routes schema deletes by ID, not name).`,
+          );
+        }
+        const res = await lcApi(
+          laravelCloudToken,
+          "DELETE",
+          `/databases/clusters/${clusterId}/databases/${known.id}`,
+          undefined,
+          { allowNotFound: true },
+        );
+        if (res === null) {
+          context.logger.warn("Database {name} was already gone", {
+            name: databaseName,
+          });
+        } else {
+          context.logger.info("Deleted database {name} from cluster {id}", {
+            name: databaseName,
+            id: clusterId,
+          });
+        }
+        const databases = stored!.databases.filter(
+          (d) => d.name !== databaseName,
+        );
+        const handle = await context.writeResource("databases", "databases", {
+          clusterId,
+          databases,
+          databaseCount: databases.length,
+          syncedAt: stored!.syncedAt,
+        });
+        return { dataHandles: [handle] };
+      },
+    },
+
+    list_snapshots: {
+      description: "List a cluster's snapshots (clusterId argument)",
+      arguments: z.object({}),
+      execute: async (_args: unknown, context: Context) => {
+        const { laravelCloudToken } = context.globalArgs;
+        const clusterId = requireArg(
+          context.globalArgs.clusterId,
+          "clusterId",
+          "list_snapshots",
+        );
+        const items = await lcPaginate(
+          laravelCloudToken,
+          `/databases/clusters/${clusterId}/snapshots`,
+          context,
+        );
+        const snapshots = items.map((s: Json) => ({
+          id: s.id,
+          name: s.attributes?.name ?? "",
+          description: s.attributes?.description ?? null,
+          status: s.attributes?.status ?? undefined,
+          storageBytes: s.attributes?.storage_bytes ?? null,
+          completedAt: s.attributes?.completed_at ?? null,
+          createdAt: s.attributes?.created_at ?? undefined,
+        }));
+        context.logger.info("Cluster {id} has {count} snapshot(s)", {
+          id: clusterId,
+          count: snapshots.length,
+        });
+        const handle = await context.writeResource("snapshots", "snapshots", {
+          clusterId,
+          snapshots,
+          snapshotCount: snapshots.length,
+          syncedAt: new Date().toISOString(),
+        });
+        return { dataHandles: [handle] };
+      },
+    },
+
+    create_snapshot: {
+      description:
+        "Create a snapshot of a cluster (clusterId + snapshotName arguments) — do this before risky changes",
+      arguments: z.object({}),
+      execute: async (_args: unknown, context: Context) => {
+        const { laravelCloudToken, snapshotName, snapshotDescription } =
+          context.globalArgs;
+        const clusterId = requireArg(
+          context.globalArgs.clusterId,
+          "clusterId",
+          "create_snapshot",
+        );
+        requireArg(snapshotName, "snapshotName", "create_snapshot");
+        const res = await lcApi(
+          laravelCloudToken,
+          "POST",
+          `/databases/clusters/${clusterId}/snapshots`,
+          {
+            name: snapshotName,
+            ...(snapshotDescription
+              ? { description: snapshotDescription }
+              : {}),
+          },
+        );
+        const data = requireData(res, "created snapshot");
+        context.logger.info(
+          "Snapshot {name} ({id}) started on cluster {cluster}",
+          {
+            name: snapshotName,
+            id: data.id,
+            cluster: clusterId,
+          },
+        );
+        const stored = (await context.readResource!("snapshots")) as
+          | SnapshotsData
+          | null;
+        const snapshots = [
+          ...(stored?.clusterId === clusterId ? stored.snapshots : []),
+          {
+            id: data.id,
+            name: snapshotName,
+            description: snapshotDescription || null,
+            status: data.attributes?.status ?? "creating",
+            storageBytes: null,
+            completedAt: null,
+            createdAt: data.attributes?.created_at ?? undefined,
+          },
+        ];
+        const handle = await context.writeResource("snapshots", "snapshots", {
+          clusterId,
+          snapshots,
+          snapshotCount: snapshots.length,
+          syncedAt: new Date().toISOString(),
+        });
+        return { dataHandles: [handle] };
+      },
+    },
+
+    delete_snapshot: {
+      description:
+        "Delete a snapshot. Gated: confirmSnapshotId must equal snapshotId, and the snapshot must be in the stored list (run list_snapshots first).",
+      arguments: z.object({}),
+      execute: async (_args: unknown, context: Context) => {
+        const { laravelCloudToken, snapshotId, confirmSnapshotId } =
+          context.globalArgs;
+        requireArg(snapshotId, "snapshotId", "delete_snapshot");
+        requireConfirm(
+          snapshotId,
+          confirmSnapshotId,
+          "confirmSnapshotId",
+          "snapshot ID",
+        );
+        const stored = (await context.readResource!("snapshots")) as
+          | SnapshotsData
+          | null;
+        const known = stored?.snapshots?.find((s) => s.id === snapshotId);
+        if (!known) {
+          throw new Error(
+            `Delete refused: snapshot ${snapshotId} is not in the stored list. ` +
+              "Run list_snapshots for its cluster first.",
+          );
+        }
+        const res = await lcApi(
+          laravelCloudToken,
+          "DELETE",
+          `/database-snapshots/${snapshotId}`,
+          undefined,
+          { allowNotFound: true },
+        );
+        if (res === null) {
+          context.logger.warn("Snapshot {id} was already gone", {
+            id: snapshotId,
+          });
+        } else {
+          context.logger.info("Deleted snapshot {name} ({id})", {
+            name: known.name,
+            id: snapshotId,
+          });
+        }
+        const snapshots = stored!.snapshots.filter((s) => s.id !== snapshotId);
+        const handle = await context.writeResource("snapshots", "snapshots", {
+          clusterId: stored!.clusterId,
+          snapshots,
+          snapshotCount: snapshots.length,
+          syncedAt: stored!.syncedAt,
+        });
+        return { dataHandles: [handle] };
+      },
+    },
+
+    restore_database: {
+      description:
+        "Restore into a NEW cluster (restoreName argument) from a snapshot (snapshotId) or point in time (restoreTime). Never overwrites existing data. Verified live: this clones the whole cluster, not a schema.",
+      arguments: z.object({}),
+      execute: async (_args: unknown, context: Context) => {
+        const { laravelCloudToken, restoreName, snapshotId, restoreTime } =
+          context.globalArgs;
+        const clusterId = requireArg(
+          context.globalArgs.clusterId,
+          "clusterId",
+          "restore_database",
+        );
+        requireArg(restoreName, "restoreName", "restore_database");
+        if (!snapshotId && !restoreTime) {
+          throw new Error(
+            "restore_database needs a source: set snapshotId OR restoreTime.",
+          );
+        }
+        if (snapshotId && restoreTime) {
+          throw new Error(
+            "restore_database takes snapshotId OR restoreTime, not both.",
+          );
+        }
+        await lcApi(
+          laravelCloudToken,
+          "POST",
+          `/databases/clusters/${clusterId}/restore`,
+          {
+            name: restoreName,
+            ...(snapshotId
+              ? { database_snapshot_id: snapshotId }
+              : { restore_time: restoreTime }),
+          },
+        );
+        context.logger.info(
+          "Restore started: a NEW cluster named '{name}' is being created from {source} — run sync_clusters to see it",
+          {
+            name: restoreName,
+            source: snapshotId || restoreTime,
+          },
+        );
+        context.logger.warn(
+          "Known platform issue: the restored cluster can appear in listings under its source cluster's ID and may only be manageable in the Cloud UI — verify there",
+        );
+        return { dataHandles: [] };
+      },
+    },
+
+    list_cache_types: {
+      description:
+        "List available cache engines with their valid sizes and regions — run before create_cache",
+      arguments: z.object({}),
+      execute: async (_args: unknown, context: Context) => {
+        const { laravelCloudToken } = context.globalArgs;
+        const res = await lcApi(laravelCloudToken, "GET", "/caches/types");
+        const types = (res.data ?? []).map((t: Json) => ({
+          type: t.type,
+          label: t.label ?? undefined,
+          sizes: (t.sizes ?? []).map((s: Json) =>
+            typeof s === "string" ? s : s.value
+          ),
+          regions: t.regions ?? [],
+        }));
+        context.logger.info("{count} cache engine(s) available", {
+          count: types.length,
+        });
+        const handle = await context.writeResource("cacheTypes", "cacheTypes", {
+          types,
+          syncedAt: new Date().toISOString(),
+        });
+        return { dataHandles: [handle] };
+      },
+    },
+
+    sync_caches: {
+      description:
+        "Sync the cache catalog into the caches resource (paginates to completion)",
+      arguments: z.object({}),
+      execute: async (_args: unknown, context: Context) => {
+        const { laravelCloudToken } = context.globalArgs;
+        context.logger.info("Syncing the cache catalog");
+        const items = await lcPaginate(laravelCloudToken, "/caches", context);
+        const caches = items.map(toCacheSummary);
+        context.logger.info("Catalog synced: {count} cache(s)", {
+          count: caches.length,
+        });
+        const handle = await context.writeResource("caches", "caches", {
+          caches,
+          cacheCount: caches.length,
+          syncedAt: new Date().toISOString(),
+        });
+        return { dataHandles: [handle] };
+      },
+    },
+
+    get_cache: {
+      description:
+        "Fetch one cache's detail (cacheId argument) — hostname/port only, never credentials",
+      arguments: z.object({}),
+      execute: async (_args: unknown, context: Context) => {
+        const { laravelCloudToken } = context.globalArgs;
+        const cacheId = requireArg(
+          context.globalArgs.cacheId,
+          "cacheId",
+          "get_cache",
+        );
+        const res = await lcApi(laravelCloudToken, "GET", `/caches/${cacheId}`);
+        const data = requireData(res, `cache ${cacheId}`);
+        context.logger.info("Fetched cache {name} (status: {status})", {
+          name: data.attributes?.name,
+          status: data.attributes?.status,
+        });
+        const handle = await context.writeResource(
+          "cache",
+          "cache",
+          toCacheDetail(data),
+        );
+        return { dataHandles: [handle] };
+      },
+    },
+
+    create_cache: {
+      description:
+        "Create a cache (cacheName/cacheType/cacheSize/region arguments)",
+      arguments: z.object({}),
+      execute: async (_args: unknown, context: Context) => {
+        const {
+          laravelCloudToken,
+          cacheName,
+          cacheType,
+          cacheSize,
+          region,
+          cachePublic,
+        } = context.globalArgs;
+        requireArg(cacheName, "cacheName", "create_cache");
+        const res = await lcApi(laravelCloudToken, "POST", "/caches", {
+          type: cacheType,
+          name: cacheName,
+          region,
+          size: cacheSize,
+          auto_upgrade_enabled: true,
+          is_public: cachePublic,
+        });
+        const data = requireData(res, "created cache");
+        context.logger.info("Created cache {name} ({id}, {size})", {
+          name: cacheName,
+          id: data.id,
+          size: cacheSize,
+        });
+        const handle = await context.writeResource(
+          "cache",
+          "cache",
+          toCacheDetail(data),
+        );
+        return { dataHandles: [handle] };
+      },
+    },
+
+    delete_cache: {
+      description:
+        "Permanently delete a cache. Gated: confirmCacheId must equal cacheId, and the cache must exist in the synced catalog.",
+      arguments: z.object({}),
+      execute: async (_args: unknown, context: Context) => {
+        const { laravelCloudToken, cacheId, confirmCacheId } =
+          context.globalArgs;
+        requireArg(cacheId, "cacheId", "delete_cache");
+        requireConfirm(cacheId, confirmCacheId, "confirmCacheId", "cache ID");
+        const catalog = (await context.readResource!("caches")) as
+          | CachesData
+          | null;
+        const known = catalog?.caches?.find((c) => c.id === cacheId);
+        if (!known) {
+          throw new Error(
+            `Delete refused: cache ${cacheId} is not in the synced catalog. ` +
+              "Run sync_caches first.",
+          );
+        }
+        const res = await lcApi(
+          laravelCloudToken,
+          "DELETE",
+          `/caches/${cacheId}`,
+          undefined,
+          { allowNotFound: true },
+        );
+        if (res === null) {
+          context.logger.warn("Cache {id} was already gone", { id: cacheId });
+        } else {
+          context.logger.info("Deleted cache {name} ({id})", {
+            name: known.name,
+            id: cacheId,
+          });
+        }
+        const remaining = catalog!.caches.filter((c) => c.id !== cacheId);
+        const handle = await context.writeResource("caches", "caches", {
+          caches: remaining,
+          cacheCount: remaining.length,
+          syncedAt: catalog!.syncedAt,
+        });
+        return { dataHandles: [handle] };
+      },
+    },
+
+    sync_buckets: {
+      description:
+        "Sync the object storage bucket catalog (paginates to completion)",
+      arguments: z.object({}),
+      execute: async (_args: unknown, context: Context) => {
+        const { laravelCloudToken } = context.globalArgs;
+        context.logger.info("Syncing the bucket catalog");
+        const items = await lcPaginate(laravelCloudToken, "/buckets", context);
+        const buckets = items.map(toBucketSummary);
+        context.logger.info("Catalog synced: {count} bucket(s)", {
+          count: buckets.length,
+        });
+        const handle = await context.writeResource("buckets", "buckets", {
+          buckets,
+          bucketCount: buckets.length,
+          syncedAt: new Date().toISOString(),
+        });
+        return { dataHandles: [handle] };
+      },
+    },
+
+    get_bucket: {
+      description: "Fetch one bucket's detail (bucketId argument)",
+      arguments: z.object({}),
+      execute: async (_args: unknown, context: Context) => {
+        const { laravelCloudToken } = context.globalArgs;
+        const bucketId = requireArg(
+          context.globalArgs.bucketId,
+          "bucketId",
+          "get_bucket",
+        );
+        const res = await lcApi(
+          laravelCloudToken,
+          "GET",
+          `/buckets/${bucketId}`,
+        );
+        const data = requireData(res, `bucket ${bucketId}`);
+        const a = data.attributes ?? {};
+        context.logger.info("Fetched bucket {name} ({visibility})", {
+          name: a.name,
+          visibility: a.visibility,
+        });
+        const handle = await context.writeResource("bucket", "bucket", {
+          ...toBucketSummary(data),
+          jurisdiction: a.jurisdiction ?? undefined,
+          endpoint: a.endpoint ?? null,
+          url: a.url ?? null,
+          updatedAt: new Date().toISOString(),
+        });
+        return { dataHandles: [handle] };
+      },
+    },
+
+    create_bucket: {
+      description:
+        "Create an object storage bucket (bucketName/bucketVisibility/bucketJurisdiction arguments). The API also mints an initial access key — its pair goes straight to the vault.",
+      arguments: z.object({}),
+      execute: async (_args: unknown, context: Context) => {
+        const {
+          laravelCloudToken,
+          bucketName,
+          bucketVisibility,
+          bucketJurisdiction,
+          bucketKeyName,
+          bucketKeyPermission,
+        } = context.globalArgs;
+        requireArg(bucketName, "bucketName", "create_bucket");
+        const keyName = bucketKeyName || `${bucketName}-key`;
+        const res = await lcApi(laravelCloudToken, "POST", "/buckets", {
+          name: bucketName,
+          visibility: bucketVisibility,
+          jurisdiction: bucketJurisdiction,
+          key_name: keyName,
+          key_permission: bucketKeyPermission,
+        });
+        const data = requireData(res, "created bucket");
+        const a = data.attributes ?? {};
+        context.logger.info(
+          "Created bucket {name} ({id}, {visibility}) with initial key {key}",
+          {
+            name: bucketName,
+            id: data.id,
+            visibility: bucketVisibility,
+            key: keyName,
+          },
+        );
+        const handles = [
+          await context.writeResource("bucket", "bucket", {
+            ...toBucketSummary(data),
+            jurisdiction: a.jurisdiction ?? undefined,
+            endpoint: a.endpoint ?? null,
+            url: a.url ?? null,
+            updatedAt: new Date().toISOString(),
+          }),
+        ];
+        // Match by the presence of key material rather than the JSON:API
+        // type string — the secret is only ever shown in this response.
+        const initialKey = (res.included ?? []).find(
+          (i: Json) => i.attributes?.access_key_secret,
+        );
+        if (initialKey) {
+          const k = initialKey.attributes ?? {};
+          handles.push(
+            await context.writeResource("bucketKey", "bucketKey", {
+              id: initialKey.id,
+              bucketId: data.id,
+              name: k.name ?? keyName,
+              permission: k.permission ?? bucketKeyPermission,
+              accessKeyId: k.access_key_id ?? "",
+              accessKeySecret: k.access_key_secret ?? "",
+              createdAt: k.created_at ?? new Date().toISOString(),
+            }),
+          );
+          context.logger.info(
+            "Initial access key {id} stored (key material in the vault)",
+            { id: initialKey.id },
+          );
+        }
+        return { dataHandles: handles };
+      },
+    },
+
+    delete_bucket: {
+      description:
+        "Permanently delete a bucket and its objects. Gated: confirmBucketId must equal bucketId, and the bucket must exist in the synced catalog.",
+      arguments: z.object({}),
+      execute: async (_args: unknown, context: Context) => {
+        const { laravelCloudToken, bucketId, confirmBucketId } =
+          context.globalArgs;
+        requireArg(bucketId, "bucketId", "delete_bucket");
+        requireConfirm(
+          bucketId,
+          confirmBucketId,
+          "confirmBucketId",
+          "bucket ID",
+        );
+        const catalog = (await context.readResource!("buckets")) as
+          | BucketsData
+          | null;
+        const known = catalog?.buckets?.find((b) => b.id === bucketId);
+        if (!known) {
+          throw new Error(
+            `Delete refused: bucket ${bucketId} is not in the synced catalog. ` +
+              "Run sync_buckets first.",
+          );
+        }
+        const res = await lcApi(
+          laravelCloudToken,
+          "DELETE",
+          `/buckets/${bucketId}`,
+          undefined,
+          { allowNotFound: true },
+        );
+        if (res === null) {
+          context.logger.warn("Bucket {id} was already gone", { id: bucketId });
+        } else {
+          context.logger.info("Deleted bucket {name} ({id})", {
+            name: known.name,
+            id: bucketId,
+          });
+        }
+        const remaining = catalog!.buckets.filter((b) => b.id !== bucketId);
+        const handle = await context.writeResource("buckets", "buckets", {
+          buckets: remaining,
+          bucketCount: remaining.length,
+          syncedAt: catalog!.syncedAt,
+        });
+        return { dataHandles: [handle] };
+      },
+    },
+
+    list_bucket_keys: {
+      description:
+        "List a bucket's access keys (bucketId argument) — names and permissions only, never secrets",
+      arguments: z.object({}),
+      execute: async (_args: unknown, context: Context) => {
+        const { laravelCloudToken } = context.globalArgs;
+        const bucketId = requireArg(
+          context.globalArgs.bucketId,
+          "bucketId",
+          "list_bucket_keys",
+        );
+        const items = await lcPaginate(
+          laravelCloudToken,
+          `/buckets/${bucketId}/keys`,
+          context,
+        );
+        const keys = items.map((k: Json) => ({
+          id: k.id,
+          name: k.attributes?.name ?? "",
+          permission: k.attributes?.permission ?? undefined,
+          createdAt: k.attributes?.created_at ?? undefined,
+        }));
+        context.logger.info("Bucket {id} has {count} access key(s)", {
+          id: bucketId,
+          count: keys.length,
+        });
+        const handle = await context.writeResource("bucketKeys", "bucketKeys", {
+          bucketId,
+          keys,
+          keyCount: keys.length,
+          syncedAt: new Date().toISOString(),
+        });
+        return { dataHandles: [handle] };
+      },
+    },
+
+    create_bucket_key: {
+      description:
+        "Create an S3-style access key for a bucket (bucketId + bucketKeyName arguments). The key pair goes straight to the vault.",
+      arguments: z.object({}),
+      execute: async (_args: unknown, context: Context) => {
+        const { laravelCloudToken, bucketKeyName, bucketKeyPermission } =
+          context.globalArgs;
+        const bucketId = requireArg(
+          context.globalArgs.bucketId,
+          "bucketId",
+          "create_bucket_key",
+        );
+        requireArg(bucketKeyName, "bucketKeyName", "create_bucket_key");
+        const res = await lcApi(
+          laravelCloudToken,
+          "POST",
+          `/buckets/${bucketId}/keys`,
+          { name: bucketKeyName, permission: bucketKeyPermission },
+        );
+        const data = requireData(res, "created bucket key");
+        const a = data.attributes ?? {};
+        context.logger.info(
+          "Created access key {name} ({id}, {permission}) — key material stored in the vault",
+          { name: bucketKeyName, id: data.id, permission: bucketKeyPermission },
+        );
+        const handle = await context.writeResource("bucketKey", "bucketKey", {
+          id: data.id,
+          bucketId,
+          name: a.name ?? bucketKeyName,
+          permission: a.permission ?? bucketKeyPermission,
+          accessKeyId: a.access_key_id ?? "",
+          accessKeySecret: a.access_key_secret ?? "",
+          createdAt: a.created_at ?? new Date().toISOString(),
+        });
+        return { dataHandles: [handle] };
+      },
+    },
+
+    delete_bucket_key: {
+      description:
+        "Revoke a bucket access key. Gated: confirmBucketKeyId must equal bucketKeyId, and the key must be in the stored list (run list_bucket_keys first). Apps using the key lose access immediately.",
+      arguments: z.object({}),
+      execute: async (_args: unknown, context: Context) => {
+        const { laravelCloudToken, bucketKeyId, confirmBucketKeyId } =
+          context.globalArgs;
+        requireArg(bucketKeyId, "bucketKeyId", "delete_bucket_key");
+        requireConfirm(
+          bucketKeyId,
+          confirmBucketKeyId,
+          "confirmBucketKeyId",
+          "bucket key ID",
+        );
+        const stored = (await context.readResource!("bucketKeys")) as
+          | BucketKeysData
+          | null;
+        const known = stored?.keys?.find((k) => k.id === bucketKeyId);
+        if (!known) {
+          throw new Error(
+            `Delete refused: access key ${bucketKeyId} is not in the stored list. ` +
+              "Run list_bucket_keys for its bucket first.",
+          );
+        }
+        const res = await lcApi(
+          laravelCloudToken,
+          "DELETE",
+          `/bucket-keys/${bucketKeyId}`,
+          undefined,
+          { allowNotFound: true },
+        );
+        if (res === null) {
+          context.logger.warn("Access key {id} was already gone", {
+            id: bucketKeyId,
+          });
+        } else {
+          context.logger.warn(
+            "Revoked access key {name} ({id}) — anything using it just lost access",
+            { name: known.name, id: bucketKeyId },
+          );
+        }
+        const keys = stored!.keys.filter((k) => k.id !== bucketKeyId);
+        const handle = await context.writeResource("bucketKeys", "bucketKeys", {
+          bucketId: stored!.bucketId,
+          keys,
+          keyCount: keys.length,
+          syncedAt: stored!.syncedAt,
+        });
+        return { dataHandles: [handle] };
+      },
+    },
+
+    update_cluster: {
+      description:
+        "Update a cluster's config (clusterId + updatePayload arguments; the API expects a config object)",
+      arguments: z.object({}),
+      execute: async (_args: unknown, context: Context) => {
+        const { laravelCloudToken, updatePayload } = context.globalArgs;
+        const clusterId = requireArg(
+          context.globalArgs.clusterId,
+          "clusterId",
+          "update_cluster",
+        );
+        const payload = parseUpdatePayload(updatePayload, "update_cluster");
+        await lcApi(
+          laravelCloudToken,
+          "PATCH",
+          `/databases/clusters/${clusterId}`,
+          payload,
+        );
+        context.logger.info("Updated cluster {id}: {fields}", {
+          id: clusterId,
+          fields: Object.keys(payload).join(", "),
+        });
+        const res = await lcApi(
+          laravelCloudToken,
+          "GET",
+          `/databases/clusters/${clusterId}`,
+        );
+        const handle = await context.writeResource(
+          "cluster",
+          "cluster",
+          toClusterDetail(requireData(res, `cluster ${clusterId}`)),
+        );
+        return { dataHandles: [handle] };
+      },
+    },
+
+    update_cache: {
+      description:
+        "Update cache settings (cacheId + updatePayload arguments, e.g. size, eviction_policy, uses_hibernation)",
+      arguments: z.object({}),
+      execute: async (_args: unknown, context: Context) => {
+        const { laravelCloudToken, updatePayload } = context.globalArgs;
+        const cacheId = requireArg(
+          context.globalArgs.cacheId,
+          "cacheId",
+          "update_cache",
+        );
+        const payload = parseUpdatePayload(updatePayload, "update_cache");
+        await lcApi(laravelCloudToken, "PATCH", `/caches/${cacheId}`, payload);
+        context.logger.info("Updated cache {id}: {fields}", {
+          id: cacheId,
+          fields: Object.keys(payload).join(", "),
+        });
+        const res = await lcApi(laravelCloudToken, "GET", `/caches/${cacheId}`);
+        const handle = await context.writeResource(
+          "cache",
+          "cache",
+          toCacheDetail(requireData(res, `cache ${cacheId}`)),
+        );
+        return { dataHandles: [handle] };
+      },
+    },
+
+    update_bucket: {
+      description:
+        "Update bucket settings (bucketId + updatePayload arguments, e.g. visibility, cors_settings)",
+      arguments: z.object({}),
+      execute: async (_args: unknown, context: Context) => {
+        const { laravelCloudToken, updatePayload } = context.globalArgs;
+        const bucketId = requireArg(
+          context.globalArgs.bucketId,
+          "bucketId",
+          "update_bucket",
+        );
+        const payload = parseUpdatePayload(updatePayload, "update_bucket");
+        await lcApi(
+          laravelCloudToken,
+          "PATCH",
+          `/buckets/${bucketId}`,
+          payload,
+        );
+        context.logger.info("Updated bucket {id}: {fields}", {
+          id: bucketId,
+          fields: Object.keys(payload).join(", "),
+        });
+        const res = await lcApi(
+          laravelCloudToken,
+          "GET",
+          `/buckets/${bucketId}`,
+        );
+        const data = requireData(res, `bucket ${bucketId}`);
+        const a = data.attributes ?? {};
+        const handle = await context.writeResource("bucket", "bucket", {
+          ...toBucketSummary(data),
+          jurisdiction: a.jurisdiction ?? undefined,
+          endpoint: a.endpoint ?? null,
+          url: a.url ?? null,
+          updatedAt: new Date().toISOString(),
+        });
+        return { dataHandles: [handle] };
+      },
+    },
+
+    update_bucket_key: {
+      description:
+        "Rename a bucket access key (bucketKeyId + updatePayload arguments; the API supports name)",
+      arguments: z.object({}),
+      execute: async (_args: unknown, context: Context) => {
+        const { laravelCloudToken, updatePayload } = context.globalArgs;
+        const bucketKeyId = requireArg(
+          context.globalArgs.bucketKeyId,
+          "bucketKeyId",
+          "update_bucket_key",
+        );
+        const payload = parseUpdatePayload(updatePayload, "update_bucket_key");
+        await lcApi(
+          laravelCloudToken,
+          "PATCH",
+          `/bucket-keys/${bucketKeyId}`,
+          payload,
+        );
+        context.logger.info("Updated access key {id}: {fields}", {
+          id: bucketKeyId,
+          fields: Object.keys(payload).join(", "),
+        });
+        const res = await lcApi(
+          laravelCloudToken,
+          "GET",
+          `/bucket-keys/${bucketKeyId}`,
+        );
+        const data = requireData(res, `access key ${bucketKeyId}`);
+        const handle = await context.writeResource(
+          "bucketKeyInfo",
+          "bucketKeyInfo",
+          {
+            id: data.id,
+            name: data.attributes?.name ?? "",
+            permission: data.attributes?.permission ?? undefined,
+            createdAt: data.attributes?.created_at ?? undefined,
+            updatedAt: new Date().toISOString(),
+          },
+        );
+        return { dataHandles: [handle] };
+      },
+    },
+
+    get_bucket_key: {
+      description:
+        "Fetch an access key's metadata (bucketKeyId argument) — never secrets",
+      arguments: z.object({}),
+      execute: async (_args: unknown, context: Context) => {
+        const { laravelCloudToken } = context.globalArgs;
+        const bucketKeyId = requireArg(
+          context.globalArgs.bucketKeyId,
+          "bucketKeyId",
+          "get_bucket_key",
+        );
+        const res = await lcApi(
+          laravelCloudToken,
+          "GET",
+          `/bucket-keys/${bucketKeyId}`,
+        );
+        const data = requireData(res, `access key ${bucketKeyId}`);
+        const handle = await context.writeResource(
+          "bucketKeyInfo",
+          "bucketKeyInfo",
+          {
+            id: data.id,
+            name: data.attributes?.name ?? "",
+            permission: data.attributes?.permission ?? undefined,
+            createdAt: data.attributes?.created_at ?? undefined,
+            updatedAt: new Date().toISOString(),
+          },
+        );
+        return { dataHandles: [handle] };
+      },
+    },
+
+    get_cluster_metrics: {
+      description:
+        "Fetch a cluster's metrics snapshot (clusterId argument; metricsPeriod optional)",
+      arguments: z.object({}),
+      execute: async (_args: unknown, context: Context) => {
+        const { laravelCloudToken, metricsPeriod } = context.globalArgs;
+        const clusterId = requireArg(
+          context.globalArgs.clusterId,
+          "clusterId",
+          "get_cluster_metrics",
+        );
+        const qs = metricsPeriod
+          ? `?period=${encodeURIComponent(metricsPeriod)}`
+          : "";
+        const res = await lcApi(
+          laravelCloudToken,
+          "GET",
+          `/databases/clusters/${clusterId}/metrics${qs}`,
+        );
+        const series = summarizeMetrics(res.data);
+        context.logger.info("Cluster {id} metrics: {names}", {
+          id: clusterId,
+          names: series.map((m) => m.name).join(", "),
+        });
+        const handle = await context.writeResource(
+          "clusterMetrics",
+          "clusterMetrics",
+          {
+            targetId: clusterId,
+            period: metricsPeriod || undefined,
+            series,
+            syncedAt: new Date().toISOString(),
+          },
+        );
+        return { dataHandles: [handle] };
+      },
+    },
+
+    get_cache_metrics: {
+      description:
+        "Fetch a cache's metrics snapshot (cacheId argument; metricsPeriod optional)",
+      arguments: z.object({}),
+      execute: async (_args: unknown, context: Context) => {
+        const { laravelCloudToken, metricsPeriod } = context.globalArgs;
+        const cacheId = requireArg(
+          context.globalArgs.cacheId,
+          "cacheId",
+          "get_cache_metrics",
+        );
+        const qs = metricsPeriod
+          ? `?period=${encodeURIComponent(metricsPeriod)}`
+          : "";
+        const res = await lcApi(
+          laravelCloudToken,
+          "GET",
+          `/caches/${cacheId}/metrics${qs}`,
+        );
+        const series = summarizeMetrics(res.data);
+        context.logger.info("Cache {id} metrics: {names}", {
+          id: cacheId,
+          names: series.map((m) => m.name).join(", "),
+        });
+        const handle = await context.writeResource(
+          "cacheMetrics",
+          "cacheMetrics",
+          {
+            targetId: cacheId,
+            period: metricsPeriod || undefined,
+            series,
+            syncedAt: new Date().toISOString(),
+          },
+        );
+        return { dataHandles: [handle] };
+      },
+    },
+
+    list_database_types: {
+      description:
+        "List available database engines with their regions — run before create_cluster",
+      arguments: z.object({}),
+      execute: async (_args: unknown, context: Context) => {
+        const { laravelCloudToken } = context.globalArgs;
+        const res = await lcApi(laravelCloudToken, "GET", "/databases/types");
+        const types = (res.data ?? []).map((t: Json) => ({
+          type: t.type ?? "",
+          label: t.label ?? undefined,
+          regions: t.regions ?? [],
+        }));
+        context.logger.info("{count} database engine(s) available", {
+          count: types.length,
+        });
+        const handle = await context.writeResource(
+          "databaseTypes",
+          "databaseTypes",
+          { types, syncedAt: new Date().toISOString() },
+        );
+        return { dataHandles: [handle] };
+      },
+    },
+
+    get_snapshot: {
+      description: "Fetch one snapshot's detail (snapshotId argument)",
+      arguments: z.object({}),
+      execute: async (_args: unknown, context: Context) => {
+        const { laravelCloudToken } = context.globalArgs;
+        const snapshotId = requireArg(
+          context.globalArgs.snapshotId,
+          "snapshotId",
+          "get_snapshot",
+        );
+        const res = await lcApi(
+          laravelCloudToken,
+          "GET",
+          `/database-snapshots/${snapshotId}`,
+        );
+        const data = requireData(res, `snapshot ${snapshotId}`);
+        const a = data.attributes ?? {};
+        context.logger.info("Snapshot {name}: {status}", {
+          name: a.name,
+          status: a.status,
+        });
+        const handle = await context.writeResource("snapshot", "snapshot", {
+          id: data.id,
+          name: a.name ?? "",
+          description: a.description ?? null,
+          status: a.status ?? undefined,
+          storageBytes: a.storage_bytes ?? null,
+          completedAt: a.completed_at ?? null,
+          createdAt: a.created_at ?? undefined,
+          updatedAt: new Date().toISOString(),
+        });
+        return { dataHandles: [handle] };
+      },
+    },
+
+    get_database: {
+      description:
+        "Fetch one database (schema) detail (clusterId + databaseName arguments; resolved to its ID via the stored list)",
+      arguments: z.object({}),
+      execute: async (_args: unknown, context: Context) => {
+        const { laravelCloudToken, databaseName } = context.globalArgs;
+        const clusterId = requireArg(
+          context.globalArgs.clusterId,
+          "clusterId",
+          "get_database",
+        );
+        requireArg(databaseName, "databaseName", "get_database");
+        const stored = (await context.readResource!("databases")) as
+          | DatabasesData
+          | null;
+        const known = (stored?.clusterId === clusterId || undefined) &&
+          stored!.databases.find((d) => d.name === databaseName);
+        if (!known?.id) {
+          throw new Error(
+            `get_database: no schema ID recorded for '${databaseName}' — run list_databases for cluster ${clusterId} first.`,
+          );
+        }
+        const res = await lcApi(
+          laravelCloudToken,
+          "GET",
+          `/databases/clusters/${clusterId}/databases/${known.id}`,
+        );
+        const data = requireData(res, `database ${databaseName}`);
+        const handle = await context.writeResource("schema", "schema", {
+          id: data.id ?? known.id,
+          clusterId,
+          name: data.attributes?.name ?? databaseName,
+          status: data.attributes?.status ?? undefined,
+          createdAt: data.attributes?.created_at ?? undefined,
+          updatedAt: new Date().toISOString(),
+        });
+        return { dataHandles: [handle] };
+      },
+    },
+  },
+};

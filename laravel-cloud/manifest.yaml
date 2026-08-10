@@ -1,0 +1,29 @@
+manifestVersion: 1
+name: "@craftquest/laravel-cloud"
+version: "2026.08.10.1"
+repository: "https://github.com/CraftQuest/swamp-extensions"
+description: "Operate Laravel Cloud from swamp — sync applications, manage environments and env vars (values never stored), deploy and follow to completion, run artisan commands, and manage domains. Destructive operations are confirmation-gated. Pure HTTPS, token from your vault."
+paths:
+  base: manifest
+models:
+  - apps.ts
+  - data.ts
+workflows:
+  - deploy-laravel.yaml
+skills:
+  - laravel-cloud
+additionalFiles:
+  - README.md
+  - LICENSE.md
+  - instances/lc-apps.yaml
+  - instances/lc-data.yaml
+platforms:
+  - darwin-aarch64
+  - darwin-x86_64
+  - linux-x86_64
+  - linux-aarch64
+labels:
+  - laravel
+  - laravel-cloud
+  - deployment
+  - hosting

@@ -1,0 +1,143 @@
+type: "@craftquest/laravel-cloud/apps"
+typeVersion: 2026.08.10.1
+id: 8c99c4d2-fe0e-49da-9d5b-87c1b1e75695
+name: lc-apps
+version: 1
+tags:
+  project: laravel-cloud
+inputs:
+  properties:
+    app_id:
+      type: string
+      default: ""
+      description: Target application ID
+    confirm_app_id:
+      type: string
+      default: ""
+      description: Delete safety gate — must exactly equal app_id
+    environment_id:
+      type: string
+      default: ""
+      description: Target environment ID
+    confirm_environment_id:
+      type: string
+      default: ""
+      description: Safety gate for delete_environment / stop_environment (while running)
+    deployment_id:
+      type: string
+      default: ""
+      description: Target deployment ID (empty = the stored deployment)
+    app_name:
+      type: string
+      default: ""
+      description: Application name for create_app
+    repository:
+      type: string
+      default: ""
+      description: Repository for create_app ('owner/name')
+    source_control_provider:
+      type: string
+      default: "github"
+      description: github, gitlab, or bitbucket
+    region:
+      type: string
+      default: "us-east-2"
+      description: Cloud region for create_app
+    root_directory:
+      type: string
+      default: ""
+      description: Monorepo root directory for create_app
+    branch:
+      type: string
+      default: ""
+      description: Git branch for create_environment
+    environment_name:
+      type: string
+      default: ""
+      description: Environment name for create_environment
+    command:
+      type: string
+      default: ""
+      description: Shell/artisan command for run_command
+    env_variables:
+      type: string
+      default: ""
+      description: JSON array of {"key","value"} pairs (values are secrets)
+    env_var_method:
+      type: string
+      default: "set"
+      description: set (update matching keys) or append
+    env_var_keys:
+      type: string
+      default: ""
+      description: JSON array of key names for delete_env_variables
+    domain_name:
+      type: string
+      default: ""
+      description: Domain name for create_domain
+    domain_id:
+      type: string
+      default: ""
+      description: Target domain ID (verify/delete)
+    confirm_domain_id:
+      type: string
+      default: ""
+      description: Delete safety gate — must exactly equal domain_id
+    update_payload:
+      type: string
+      default: ""
+      description: JSON object of fields to change (update_* methods)
+    avatar_path:
+      type: string
+      default: ""
+      description: Local image path for upload_avatar
+    log_query:
+      type: string
+      default: ""
+      description: Search query for get_environment_logs
+    log_type:
+      type: string
+      default: ""
+      description: Log type filter (access, application, exception, system)
+    metrics_period:
+      type: string
+      default: ""
+      description: Metrics period (API default when empty)
+    log_from:
+      type: string
+      default: ""
+      description: Log range start ISO datetime (default one hour ago)
+    log_to:
+      type: string
+      default: ""
+      description: Log range end ISO datetime (default now)
+  required: []
+globalArguments:
+  laravelCloudToken: ${{ vault.get(laravel-cloud-secrets, LARAVEL_CLOUD_TOKEN) }}
+  appId: ${{ inputs.app_id }}
+  confirmAppId: ${{ inputs.confirm_app_id }}
+  environmentId: ${{ inputs.environment_id }}
+  confirmEnvironmentId: ${{ inputs.confirm_environment_id }}
+  deploymentId: ${{ inputs.deployment_id }}
+  appName: ${{ inputs.app_name }}
+  repository: ${{ inputs.repository }}
+  sourceControlProvider: ${{ inputs.source_control_provider }}
+  region: ${{ inputs.region }}
+  rootDirectory: ${{ inputs.root_directory }}
+  branch: ${{ inputs.branch }}
+  environmentName: ${{ inputs.environment_name }}
+  command: ${{ inputs.command }}
+  envVariables: ${{ inputs.env_variables }}
+  envVarMethod: ${{ inputs.env_var_method }}
+  envVarKeys: ${{ inputs.env_var_keys }}
+  domainName: ${{ inputs.domain_name }}
+  domainId: ${{ inputs.domain_id }}
+  confirmDomainId: ${{ inputs.confirm_domain_id }}
+  updatePayload: ${{ inputs.update_payload }}
+  avatarPath: ${{ inputs.avatar_path }}
+  logQuery: ${{ inputs.log_query }}
+  logType: ${{ inputs.log_type }}
+  metricsPeriod: ${{ inputs.metrics_period }}
+  logFrom: ${{ inputs.log_from }}
+  logTo: ${{ inputs.log_to }}
+methods: {}

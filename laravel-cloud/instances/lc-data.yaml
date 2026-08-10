@@ -1,0 +1,168 @@
+type: "@craftquest/laravel-cloud/data"
+typeVersion: 2026.08.10.1
+id: 156ed6f0-3d3d-412c-beee-374e09c2b782
+name: lc-data
+version: 1
+tags:
+  project: laravel-cloud
+inputs:
+  properties:
+    cluster_id:
+      type: string
+      default: ""
+      description: Target database cluster ID
+    confirm_cluster_id:
+      type: string
+      default: ""
+      description: Delete safety gate — must exactly equal cluster_id
+    cluster_name:
+      type: string
+      default: ""
+      description: Cluster name for create_cluster
+    database_type:
+      type: string
+      default: "laravel_mysql_84"
+      description: Database engine for create_cluster
+    region:
+      type: string
+      default: "us-east-2"
+      description: Cloud region for creates
+    cluster_config:
+      type: string
+      default: ""
+      description: Optional JSON config for create_cluster (engine-specific)
+    database_name:
+      type: string
+      default: ""
+      description: Database (schema) name within a cluster
+    confirm_database_name:
+      type: string
+      default: ""
+      description: Delete safety gate — must exactly equal database_name
+    snapshot_name:
+      type: string
+      default: ""
+      description: Snapshot name for create_snapshot
+    snapshot_description:
+      type: string
+      default: ""
+      description: Optional snapshot description
+    snapshot_id:
+      type: string
+      default: ""
+      description: Target snapshot ID (delete_snapshot, restore source)
+    confirm_snapshot_id:
+      type: string
+      default: ""
+      description: Delete safety gate — must exactly equal snapshot_id
+    restore_name:
+      type: string
+      default: ""
+      description: Name of the NEW database created by restore_database
+    restore_time:
+      type: string
+      default: ""
+      description: Point-in-time restore target (ISO datetime); exclusive with snapshot_id
+    cache_id:
+      type: string
+      default: ""
+      description: Target cache ID
+    confirm_cache_id:
+      type: string
+      default: ""
+      description: Delete safety gate — must exactly equal cache_id
+    cache_name:
+      type: string
+      default: ""
+      description: Cache name for create_cache
+    cache_type:
+      type: string
+      default: "laravel_valkey"
+      description: Cache engine (laravel_valkey, upstash_redis, ...)
+    cache_size:
+      type: string
+      default: "valkey-flex-250mb"
+      description: Cache size — engine-specific; run list_cache_types
+    cache_public:
+      type: boolean
+      default: false
+      description: Whether the cache is publicly reachable
+    bucket_id:
+      type: string
+      default: ""
+      description: Target object storage bucket ID
+    confirm_bucket_id:
+      type: string
+      default: ""
+      description: Delete safety gate — must exactly equal bucket_id
+    bucket_name:
+      type: string
+      default: ""
+      description: Bucket name for create_bucket
+    bucket_visibility:
+      type: string
+      default: "private"
+      description: private or public
+    bucket_jurisdiction:
+      type: string
+      default: "default"
+      description: default or eu
+    bucket_key_name:
+      type: string
+      default: ""
+      description: Access key name for create_bucket_key
+    bucket_key_permission:
+      type: string
+      default: "read_write"
+      description: read_write or read_only
+    bucket_key_id:
+      type: string
+      default: ""
+      description: Target access key ID (delete_bucket_key)
+    confirm_bucket_key_id:
+      type: string
+      default: ""
+      description: Delete safety gate — must exactly equal bucket_key_id
+    update_payload:
+      type: string
+      default: ""
+      description: JSON object of fields to change (update_* methods)
+    metrics_period:
+      type: string
+      default: ""
+      description: Metrics period (API default when empty)
+  required: []
+globalArguments:
+  laravelCloudToken: ${{ vault.get(laravel-cloud-secrets, LARAVEL_CLOUD_TOKEN) }}
+  clusterId: ${{ inputs.cluster_id }}
+  confirmClusterId: ${{ inputs.confirm_cluster_id }}
+  clusterName: ${{ inputs.cluster_name }}
+  databaseType: ${{ inputs.database_type }}
+  region: ${{ inputs.region }}
+  clusterConfig: ${{ inputs.cluster_config }}
+  databaseName: ${{ inputs.database_name }}
+  confirmDatabaseName: ${{ inputs.confirm_database_name }}
+  snapshotName: ${{ inputs.snapshot_name }}
+  snapshotDescription: ${{ inputs.snapshot_description }}
+  snapshotId: ${{ inputs.snapshot_id }}
+  confirmSnapshotId: ${{ inputs.confirm_snapshot_id }}
+  restoreName: ${{ inputs.restore_name }}
+  restoreTime: ${{ inputs.restore_time }}
+  cacheId: ${{ inputs.cache_id }}
+  confirmCacheId: ${{ inputs.confirm_cache_id }}
+  cacheName: ${{ inputs.cache_name }}
+  cacheType: ${{ inputs.cache_type }}
+  cacheSize: ${{ inputs.cache_size }}
+  cachePublic: ${{ inputs.cache_public }}
+  bucketId: ${{ inputs.bucket_id }}
+  confirmBucketId: ${{ inputs.confirm_bucket_id }}
+  bucketName: ${{ inputs.bucket_name }}
+  bucketVisibility: ${{ inputs.bucket_visibility }}
+  bucketJurisdiction: ${{ inputs.bucket_jurisdiction }}
+  bucketKeyName: ${{ inputs.bucket_key_name }}
+  bucketKeyPermission: ${{ inputs.bucket_key_permission }}
+  bucketKeyId: ${{ inputs.bucket_key_id }}
+  confirmBucketKeyId: ${{ inputs.confirm_bucket_key_id }}
+  updatePayload: ${{ inputs.update_payload }}
+  metricsPeriod: ${{ inputs.metrics_period }}
+methods: {}

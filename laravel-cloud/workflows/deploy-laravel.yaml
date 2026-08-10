@@ -1,0 +1,127 @@
+id: ca45af7f-d622-405e-b744-b56088b802fd
+name: "@craftquest/deploy-laravel"
+description: Deploy a Laravel Cloud environment's tracked branch, follow the deployment to completion, then run the database migrations
+version: 1
+inputs:
+  properties:
+    environment_id:
+      type: string
+      description: The Laravel Cloud environment ID to deploy
+    migrate_command:
+      type: string
+      default: "php artisan migrate --force"
+      description: Post-deploy command run in the environment
+    app_id:
+      type: string
+      default: ""
+    confirm_app_id:
+      type: string
+      default: ""
+    confirm_environment_id:
+      type: string
+      default: ""
+    deployment_id:
+      type: string
+      default: ""
+    app_name:
+      type: string
+      default: ""
+    repository:
+      type: string
+      default: ""
+    source_control_provider:
+      type: string
+      default: "github"
+    region:
+      type: string
+      default: "us-east-2"
+    root_directory:
+      type: string
+      default: ""
+    branch:
+      type: string
+      default: ""
+    environment_name:
+      type: string
+      default: ""
+    env_variables:
+      type: string
+      default: ""
+    env_var_method:
+      type: string
+      default: "set"
+    env_var_keys:
+      type: string
+      default: ""
+    domain_name:
+      type: string
+      default: ""
+    domain_id:
+      type: string
+      default: ""
+    confirm_domain_id:
+      type: string
+      default: ""
+    update_payload:
+      type: string
+      default: ""
+    avatar_path:
+      type: string
+      default: ""
+    log_query:
+      type: string
+      default: ""
+    log_type:
+      type: string
+      default: ""
+    metrics_period:
+      type: string
+      default: ""
+    log_from:
+      type: string
+      default: ""
+    log_to:
+      type: string
+      default: ""
+    command:
+      type: string
+      default: ""
+  required:
+    - environment_id
+jobs:
+  - name: deploy
+    description: Deploy, follow to completion, migrate
+    steps:
+      - name: initiate
+        description: Initiate deployment of the environment's tracked branch
+        task:
+          type: model_method
+          modelIdOrName: lc-apps
+          methodName: deploy
+          inputs:
+            environment_id: ${{ inputs.environment_id }}
+      - name: wait
+        description: Follow the deployment until it succeeds (fails with reason + log tail otherwise)
+        task:
+          type: model_method
+          modelIdOrName: lc-apps
+          methodName: wait_deployment
+          inputs:
+            environment_id: ${{ inputs.environment_id }}
+        dependsOn:
+          - step: initiate
+            condition:
+              type: completed
+      - name: migrate
+        description: Run the migrations in the freshly deployed environment
+        task:
+          type: model_method
+          modelIdOrName: lc-apps
+          methodName: run_command
+          inputs:
+            environment_id: ${{ inputs.environment_id }}
+            command: ${{ inputs.migrate_command }}
+        dependsOn:
+          - step: wait
+            condition:
+              type: completed
