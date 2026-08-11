@@ -398,15 +398,18 @@ function sleep(ms: number): Promise<void> {
  * `allowNotFound`, a 404 returns null (for idempotent deletes).
  */
 async function lcApi(
-  token: string,
+  tokenArg: string,
   method: string,
   path: string,
   body?: unknown,
   opts: { allowNotFound?: boolean; form?: FormData } = {},
 ): Promise<Json> {
+  // vault-wired argument first; LARAVEL_CLOUD_TOKEN env var as fallback
+  // (Hetzner-style zero-setup: export the var and run @type-prefixed methods)
+  const token = tokenArg || Deno.env.get("LARAVEL_CLOUD_TOKEN") || "";
   if (!token) {
     throw new Error(
-      "laravelCloudToken is empty — check the vault wiring for LARAVEL_CLOUD_TOKEN.",
+      "No Laravel Cloud token: wire LARAVEL_CLOUD_TOKEN into the laravel-cloud-secrets vault (recommended) or export it as an environment variable.",
     );
   }
   const url = path.startsWith("https://") ? path : `${LC_API_BASE}${path}`;
@@ -700,7 +703,7 @@ async function fetchAndWriteEnvironment(
 export const model = {
   type: "@craftquest/laravel-cloud/apps",
   reports: ["@craftquest/laravel-cloud-usage"],
-  version: "2026.08.10.4",
+  version: "2026.08.10.5",
   upgrades: [
     {
       toVersion: "2026.08.10.2",
@@ -717,6 +720,12 @@ export const model = {
       toVersion: "2026.08.10.4",
       description:
         "safe-deploy workflow + run_command fails on nonzero exit + idempotent queue pause/resume; no schema changes",
+      upgradeAttributes: (old: Record<string, unknown>) => old,
+    },
+    {
+      toVersion: "2026.08.10.5",
+      description:
+        "LARAVEL_CLOUD_TOKEN environment fallback for zero-setup use; no schema changes",
       upgradeAttributes: (old: Record<string, unknown>) => old,
     },
   ],
@@ -820,10 +829,14 @@ export const model = {
     "lc-credentials": {
       description: "Verify the Laravel Cloud token is wired in from the vault",
       execute: (context: Context) => {
+        const token = context.globalArgs.laravelCloudToken ||
+          Deno.env.get("LARAVEL_CLOUD_TOKEN");
         return Promise.resolve(
-          context.globalArgs.laravelCloudToken ? { pass: true } : {
+          token ? { pass: true } : {
             pass: false,
-            errors: ["laravelCloudToken is empty — check the vault wiring."],
+            errors: [
+              "No Laravel Cloud token: wire LARAVEL_CLOUD_TOKEN into the vault (recommended) or export it as an environment variable.",
+            ],
           },
         );
       },
@@ -833,12 +846,6 @@ export const model = {
       labels: ["live"],
       execute: async (context: Context) => {
         const { laravelCloudToken } = context.globalArgs;
-        if (!laravelCloudToken) {
-          return {
-            pass: false,
-            errors: ["Token empty; see lc-credentials check."],
-          };
-        }
         try {
           await lcApi(laravelCloudToken, "GET", "/meta/organization");
           return { pass: true };

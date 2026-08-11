@@ -19,16 +19,11 @@ your swamp vault and is never accepted as a plain input.
 
 ## Install
 
-```bash
-swamp extension pull @craftquest/laravel-cloud
-```
-
-## One-time setup
-
 New to swamp? It's a local automation runtime — think "Composer, but for
 automation": you pull tools from a registry and run them locally, and every run
 leaves typed records you can query. All swamp state lives in a repository
-directory, so first make yourself a toolbox (once, ever):
+directory, so first make yourself a toolbox (once, ever), then pull the
+extension into it:
 
 ```bash
 mkdir ~/cloud-toolbox && cd ~/cloud-toolbox && swamp repo init
@@ -36,6 +31,25 @@ swamp extension pull @craftquest/laravel-cloud
 ```
 
 Your Laravel apps don't live here — only the machinery does.
+
+## Quick start (zero setup)
+
+Want to explore before configuring anything? Export your token and run any
+method with the `@type` prefix — swamp creates a definition on the fly:
+
+```bash
+export LARAVEL_CLOUD_TOKEN="<your api token>"
+swamp model method run "@craftquest/laravel-cloud/apps" sync_apps my-org
+swamp data get my-org apps
+```
+
+Inputs on these on-the-fly definitions use the model's camelCase argument names
+(`appId`, `environmentId`, ...). Graduate to the setup below when you want the
+vault holding your token instead of your shell, snake_case inputs, more than one
+organization — or the bundled workflows, which drive the named instances that
+setup creates.
+
+## Recommended setup
 
 1. Store the token:
 
@@ -55,8 +69,11 @@ Your Laravel apps don't live here — only the machinery does.
    swamp model validate lc-data
    ```
 
-Managing more than one organization? Copy the instance again with a new `name`,
-a new `id` (any UUID), and a different vault key.
+Why the copy? swamp separates published _types_ (the machinery) from _instances_
+(your configuration — vault wiring, input names). The instance files are yours
+to edit, so the pull doesn't write them into your repo for you. Managing more
+than one organization? Copy the instance again with a new `name`, a new `id`
+(any UUID), and a different vault key.
 
 ## Methods (apps model)
 

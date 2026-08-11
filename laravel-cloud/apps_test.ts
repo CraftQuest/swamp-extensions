@@ -165,7 +165,7 @@ Deno.test("methods throw when the token is empty", async () => {
     await assertRejects(
       () => model.methods.sync_apps.execute({}, context),
       Error,
-      "laravelCloudToken is empty",
+      "No Laravel Cloud token",
     );
   });
 });
@@ -818,4 +818,35 @@ Deno.test("run_command stores output then FAILS when the command fails", async (
   const written = getWrittenResources();
   assertEquals(written[0].specName, "commandRun");
   assertEquals(written[0].data.exitCode, 1);
+});
+
+Deno.test("token falls back to the LARAVEL_CLOUD_TOKEN env var", async () => {
+  Deno.env.set("LARAVEL_CLOUD_TOKEN", "env-token-123");
+  try {
+    const { context, getWrittenResources } = createModelTestContext({
+      globalArgs: args({ laravelCloudToken: "" }),
+    });
+    await withMockedFetch(
+      [{ status: 200, body: { data: [], links: {} } }],
+      async (calls) => {
+        await model.methods.sync_apps.execute({}, context);
+        assertEquals(calls.length, 1); // no "token empty" throw — env used
+      },
+    );
+    assertEquals(getWrittenResources()[0].data.appCount, 0);
+  } finally {
+    Deno.env.delete("LARAVEL_CLOUD_TOKEN");
+  }
+});
+
+Deno.test("with no vault token and no env var, methods still refuse", async () => {
+  Deno.env.delete("LARAVEL_CLOUD_TOKEN");
+  const { context } = createModelTestContext({
+    globalArgs: args({ laravelCloudToken: "" }),
+  });
+  await assertRejects(
+    () => model.methods.sync_apps.execute({}, context),
+    Error,
+    "No Laravel Cloud token",
+  );
 });

@@ -27,7 +27,9 @@ State lives in per-purpose resources — read with
 
 ## Pre-flight (before any method)
 
-1. Vault `laravel-cloud-secrets` must contain `LARAVEL_CLOUD_TOKEN` —
+1. Token resolution order: the vault-wired argument first, then the
+   LARAVEL_CLOUD_TOKEN environment variable. For real setups, vault
+   `laravel-cloud-secrets` must contain `LARAVEL_CLOUD_TOKEN` —
    verify with `swamp vault list-keys laravel-cloud-secrets --json`. If
    missing, the user creates a token in the Cloud UI (API tokens) and runs
    the `vault put` from the README themselves — never ask them to paste a
