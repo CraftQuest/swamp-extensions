@@ -1,0 +1,141 @@
+# Run Laravel Cloud by talking to your AI agent
+
+**The sample project:** deploy a Laravel app to Laravel Cloud, give it a
+managed queue with queue-safe deploys, manage its env vars, check the
+bill, and tear it all down — **without typing a single API call**. You
+talk; your agent drives `@craftquest/laravel-cloud`, a published,
+inspectable [swamp](https://github.com/swamp-club/swamp) extension whose
+safety gates hold no matter who's driving. About 15 minutes; costs cents;
+every destructive step requires your explicit confirmation.
+
+This isn't "AI, wing it and hope." The extension ships a *skill* — an
+operating manual your agent follows — plus typed state records it
+consults instead of guessing, and confirmation gates it cannot bypass.
+The sentence is the interface; the toolbox is the trust.
+
+## Prerequisites
+
+- A [Laravel Cloud](https://cloud.laravel.com) organization with the git
+  integration connected (Cloud UI, one-time), and an **API token**
+  (Cloud UI → API tokens)
+- A Laravel repo the integration can see (the skeleton is fine; add
+  `aws/aws-sdk-php` to composer.json if you'll use a managed queue)
+- swamp installed (free, no account)
+- An AI agent that reads skills: Claude Code, Cursor, Codex, opencode,
+  or Kiro
+
+## Setup (once, ~2 minutes)
+
+```bash
+mkdir ~/cloud-toolbox && cd ~/cloud-toolbox && swamp repo init
+swamp extension pull @craftquest/laravel-cloud
+
+swamp vault create local_encryption laravel-cloud-secrets
+printf '%s' "<your api token>" | swamp vault put laravel-cloud-secrets LARAVEL_CLOUD_TOKEN
+
+mkdir -p "models/@craftquest/laravel-cloud"
+cp ".swamp/pulled-extensions/@craftquest/laravel-cloud/files/instances/"*.yaml \
+   "models/@craftquest/laravel-cloud/"
+```
+
+Three things just happened: your token went into an encrypted local vault
+(you run that command yourself — a well-behaved agent will never ask you
+to paste a token into chat); the instance files — *your* editable
+configuration — moved into your repo; and, quietly, **the extension
+taught your agent how to use it**: a `laravel-cloud` skill landed in your
+agent's skill directory. That last part is the whole tutorial.
+
+Now open your agent in the toolbox. Everything from here is
+conversation.
+
+## 1. "Deploy the acme/my-laravel-app repo on Laravel Cloud"
+
+Your agent creates the application, discovers the `production`
+environment Laravel Cloud started for it, and runs the bundled
+`@craftquest/deploy-laravel` pipeline: deploy the tracked branch, follow
+the build to completion, run the migrations. Then it hands you the URL.
+
+Under the hood that was one workflow run — and if the build fails, the
+agent shows you the failing step's log tail, because the pipeline
+surfaces it in the error. (Real example: deploy an app with a managed
+queue but without `aws/aws-sdk-php`, and the failure message names the
+exact composer command to run.)
+
+## 2. "Add a managed queue and redeploy the queue-safe way"
+
+The agent creates a scale-to-zero managed queue (it knows the platform's
+rules — sizing groups, worker limits — from the skill and the
+`list_instance_sizes` discovery method), then switches your deploys to
+`@craftquest/safe-deploy`: **pause the queue** so no worker processes
+jobs mid-migration → deploy → migrate → **resume**. If anything fails, a
+cleanup job resumes the queue anyway — nobody's queue gets left paused
+by a bad deploy.
+
+## 3. "Set APP_TIMEZONE to America/Chicago on production"
+
+Done — and here's the part worth noticing: ask your agent *"what env
+vars does production have?"* and it answers with **key names only**.
+Values never enter swamp's records, logs, or the conversation. The skill
+also forbids the agent from fishing values out via artisan tricks. Your
+secrets stay on the platform.
+
+## 4. "What's Laravel Cloud costing me?"
+
+The agent pulls the usage summary and shows you the bundled spend
+report: current spend, credit balance, alert headroom, per-app cost
+tables. For this tutorial the answer is: cents, probably covered
+entirely by the platform's starting credits.
+
+## 5. "Delete the app" — and watch what the agent *can't* do
+
+Here's the trust story. The agent won't just do it: it reads the app's
+real ID from the synced records, shows it to you, and asks you to
+confirm **that exact ID** — because the tool itself refuses anything
+else. Every destructive method demands the ID re-stated *and* verifies
+the target exists in synced state. A guessed, inferred, or mistyped ID
+deletes nothing. The guardrails are in the tool, not in the prompt — the
+same gates hold for you, for CI, and for any agent.
+
+## 6. "Tear it all down so nothing is billing"
+
+The agent deletes inner resources before outer ones (the platform
+enforces the order), then sweeps every catalog — apps, clusters, caches,
+buckets — and reports each at zero. Ask for the spend report again to
+see the flatline.
+
+## Why this works
+
+- **The skill** — the extension ships its own operating manual: method
+  protocols, triage orders (pause a stuck queue *before* diagnosing),
+  and hard rules (never infer a confirmation; never run destructive
+  artisan unless you typed it; failed commands email real humans, so no
+  failure probes).
+- **The records** — every run writes typed state (`swamp data get
+  lc-apps deployment`), so the agent answers from what actually happened
+  instead of re-fetching or guessing.
+- **The gates** — destruction requires exact-ID confirmation checked
+  against real state, in the tool itself.
+- **The workflows** — one intent maps to one tested pipeline, failure
+  handling included, instead of an agent improvising step chains.
+
+## Appendix: the same project as commands
+
+Everything above is equally scriptable — CI pipelines use the identical
+interface:
+
+```bash
+swamp model method run lc-apps create_app \
+  --input '{"app_name": "my-app", "repository": "acme/my-laravel-app"}'
+swamp workflow run "@craftquest/safe-deploy" \
+  --input '{"environment_id": "<env id>", "queue_instance_id": "<queue id>"}'
+swamp model method run lc-apps get_usage
+swamp report get @craftquest/laravel-cloud-usage --model lc-apps --markdown
+swamp model method run lc-apps delete_app \
+  --input '{"app_id": "<app id>", "confirm_app_id": "<app id>"}'
+```
+
+The full method reference:
+`swamp model type describe "@craftquest/laravel-cloud/apps" --json` (and
+`/data`, `/queues`). To build your own pipelines, copy the shipped
+`workflow-template.yaml` — the README's Workflows section covers the two
+authoring rules.

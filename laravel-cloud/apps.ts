@@ -703,7 +703,7 @@ async function fetchAndWriteEnvironment(
 export const model = {
   type: "@craftquest/laravel-cloud/apps",
   reports: ["@craftquest/laravel-cloud-usage"],
-  version: "2026.08.10.5",
+  version: "2026.08.10.6",
   upgrades: [
     {
       toVersion: "2026.08.10.2",
@@ -726,6 +726,12 @@ export const model = {
       toVersion: "2026.08.10.5",
       description:
         "LARAVEL_CLOUD_TOKEN environment fallback for zero-setup use; no schema changes",
+      upgradeAttributes: (old: Record<string, unknown>) => old,
+    },
+    {
+      toVersion: "2026.08.10.6",
+      description:
+        "README leads with the agent-first interface; no code changes",
       upgradeAttributes: (old: Record<string, unknown>) => old,
     },
   ],

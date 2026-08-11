@@ -32,7 +32,34 @@ swamp extension pull @craftquest/laravel-cloud
 
 Your Laravel apps don't live here — only the machinery does.
 
-## Quick start (zero setup)
+**New here? Start with the [agent-first tutorial](TUTORIAL.md)** — deploy, operate, and tear down a real app by conversation.
+
+## Use it by talking to your AI agent
+
+This is the primary interface. The pull just installed a `laravel-cloud` skill
+into your agent's skill directory (Claude Code, Cursor, Codex, opencode, and
+Kiro are all supported) — it teaches the agent every method, every protocol, and
+every rule it must not break. Open your agent in this toolbox and use plain
+language:
+
+> "Deploy the CraftQuest/laravel-habits repo on Laravel Cloud"
+>
+> "What's Laravel Cloud costing me?"
+>
+> "The queue looks stuck — what's going on?"
+>
+> "Set APP_TIMEZONE to America/Chicago on production"
+>
+> "Tear it down so nothing is billing"
+
+The agent runs the same models and workflows documented below — the sentence and
+the command are the same tool. The skill also enforces the safety protocol:
+before anything destructive, the agent must surface the real resource ID and get
+your confirmation, because the confirmation gates in the tool refuse anything
+else. Env var values and connection credentials never pass through the agent's
+output — the same stripping that protects the CLI protects the conversation.
+
+## Quick start (zero setup, no agent)
 
 Want to explore before configuring anything? Export your token and run any
 method with the `@type` prefix — swamp creates a definition on the fly:
