@@ -1,8 +1,9 @@
 # Run Laravel Cloud by talking to your AI agent
 
 **The sample project:** deploy a Laravel app to Laravel Cloud, give it a
-managed queue with queue-safe deploys, manage its env vars, check the
-bill, and tear it all down — **without typing a single API call**. You
+managed queue with queue-safe deploys, snapshot the database before a
+migration, manage its env vars, check the bill, stop and restart the
+site, and tear it all down — **without typing a single API call**. You
 talk; your agent drives `@craftquest/laravel-cloud`, a published,
 inspectable [swamp](https://github.com/swamp-club/swamp) extension whose
 safety gates hold no matter who's driving. About 15 minutes; costs cents;
@@ -71,6 +72,12 @@ jobs mid-migration → deploy → migrate → **resume**. If anything fails, a
 cleanup job resumes the queue anyway — nobody's queue gets left paused
 by a bad deploy.
 
+Before a migration that changes schema, try *"snapshot the database
+first."* The agent takes a named snapshot and only then deploys — and
+if you ever need it back, `restore_database` builds a **new** cluster
+from that snapshot. It never overwrites the one you're running on, so
+"restore" can't itself become the outage.
+
 ## 3. "Set APP_TIMEZONE to America/Chicago on production"
 
 Done — and here's the part worth noticing: ask your agent *"what env
@@ -86,7 +93,25 @@ report: current spend, credit balance, alert headroom, per-app cost
 tables. For this tutorial the answer is: cents, probably covered
 entirely by the platform's starting credits.
 
-## 5. "Delete the app" — and watch what the agent *can't* do
+## 5. "Stop the environment for the night"
+
+Cheaper than deleting, and it shows the gates working on something
+reversible. The agent checks the environment's real status first, and
+because stopping it takes the site offline, it has to surface the ID and
+get your confirmation.
+
+The detail worth knowing: Laravel Cloud environments can be `running`,
+`hibernating`, `deploying`, or `stopped` — and **hibernating is not
+off**. It has scaled to zero to save money but still wakes on the next
+request, so stopping it is just as much an outage as stopping a busy
+one. The tool gates every state except `stopped`, where stopping changes
+nothing and needs no ceremony. An unfamiliar status gets gated too,
+rather than assumed safe.
+
+Say *"start it back up"* and it returns — no confirmation needed, because
+starting can't take anything down.
+
+## 6. "Delete the app" — and watch what the agent *can't* do
 
 Here's the trust story. The agent won't just do it: it reads the app's
 real ID from the synced records, shows it to you, and asks you to
@@ -96,7 +121,7 @@ the target exists in synced state. A guessed, inferred, or mistyped ID
 deletes nothing. The guardrails are in the tool, not in the prompt — the
 same gates hold for you, for CI, and for any agent.
 
-## 6. "Tear it all down so nothing is billing"
+## 7. "Tear it all down so nothing is billing"
 
 The agent deletes inner resources before outer ones (the platform
 enforces the order), then sweeps every catalog — apps, clusters, caches,
@@ -114,7 +139,9 @@ see the flatline.
   lc-apps deployment`), so the agent answers from what actually happened
   instead of re-fetching or guessing.
 - **The gates** — destruction requires exact-ID confirmation checked
-  against real state, in the tool itself.
+  against real state, in the tool itself. They're written to fail toward
+  refusing: a status the tool doesn't recognize gets confirmation asked
+  for, not waved through.
 - **The workflows** — one intent maps to one tested pipeline, failure
   handling included, instead of an agent improvising step chains.
 
@@ -130,6 +157,8 @@ swamp workflow run "@craftquest/safe-deploy" \
   --input '{"environment_id": "<env id>", "queue_instance_id": "<queue id>"}'
 swamp model method run lc-apps get_usage
 swamp report get @craftquest/laravel-cloud-usage --model lc-apps --markdown
+swamp model method run lc-apps stop_environment \
+  --input '{"environment_id": "<env id>", "confirm_environment_id": "<env id>"}'
 swamp model method run lc-apps delete_app \
   --input '{"app_id": "<app id>", "confirm_app_id": "<app id>"}'
 ```
