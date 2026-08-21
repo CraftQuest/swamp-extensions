@@ -2,12 +2,18 @@
 
 Operate [Laravel Cloud](https://cloud.laravel.com) from swamp: sync your
 application catalog, manage environments and their variables, deploy and follow
-deployments to completion, run artisan commands, and manage custom domains —
-with every destructive operation behind a confirmation gate.
+deployments to completion, run artisan commands, manage custom domains, and
+drive the data side too, like database clusters with snapshots and restores,
+caches, object storage, and managed queues. Every destructive operation sits
+behind a confirmation gate.
+
+Three models (`apps`, `data`, `queues`), two deploy workflows, a spend report,
+and an agent skill, in one pull.
 
 Built and maintained by [CraftQuest](https://craftquest.io). Pure HTTPS against
-`cloud.laravel.com/api` — no shell commands, no SDK. The API token comes from
-your swamp vault and is never accepted as a plain input.
+`cloud.laravel.com/api`. The API token comes from
+your swamp vault (or, for quick exploration, a `LARAVEL_CLOUD_TOKEN`
+environment variable) and is never accepted as a plain input.
 
 ## Prerequisites
 
@@ -31,8 +37,6 @@ swamp extension pull @craftquest/laravel-cloud
 ```
 
 Your Laravel apps don't live here — only the machinery does.
-
-**New here? Start with the [agent-first tutorial](TUTORIAL.md)** — deploy, operate, and tear down a real app by conversation.
 
 ## Use it by talking to your AI agent
 
@@ -114,7 +118,7 @@ than one organization? Copy the instance again with a new `name`, a new `id`
 | `create_environment`                                                 | Create an environment tracking a branch                                               |
 | `delete_environment`                                                 | Double-gated (confirm + present in stored app detail)                                 |
 | `start_environment`                                                  | Start a stopped environment                                                           |
-| `stop_environment`                                                   | Gated **only while running** — stopping a live site needs confirmation                |
+| `stop_environment`                                                   | Gated **unless already stopped** — running, hibernating and deploying all need confirmation |
 | `set_env_variables`                                                  | Add/update env vars (values via a sensitive argument, never stored or logged)         |
 | `delete_env_variables`                                               | Delete env vars by key name                                                           |
 | `purge_edge_cache`                                                   | Purge the environment's edge cache                                                    |
@@ -194,6 +198,23 @@ replicas, creation requires a `background_processes` array (e.g.
 `[{"type": "worker", "processes": 1}]`), and managed-queue workers always have
 exactly one process — scale with replicas, not processes.
 
+**Background processes are a different thing from that creation array.** They
+attach to `app`, `service` or `queue` instances — *not* to a `managed_queue`,
+which answers `Background processes are not available for managed queues`.
+Creating one requires `config.connection` and `config.queue`; omit them and
+the API rejects the call with an HTML redirect rather than a JSON error, so
+the failure reads as a redirect rather than a validation message:
+
+```bash
+swamp model method run lc-queues create_background_process --input '{
+  "instance_id": "<app instance id>",
+  "create_payload": "{\"type\":\"worker\",\"processes\":1,\"command\":\"php artisan queue:work\",\"config\":{\"connection\":\"sqs\",\"queue\":\"default\"}}"
+}'
+```
+
+`update_background_process` was verified sending the whole definition back —
+type, processes, command and config — rather than just the changed field.
+
 ## State: every run leaves records
 
 Each method writes typed resources you can read back — that's how you (and your
@@ -223,16 +244,29 @@ swamp model type describe "@craftquest/laravel-cloud/queues" --json
 
 ## Workflows
 
-The extension ships two ready-made pipelines. `@craftquest/deploy-laravel`:
-deploy the environment's tracked branch → follow the deployment to completion
-(failing loudly with the reason and log tail) → run the migrations. One command:
+The extension ships two ready-made pipelines.
+
+**`@craftquest/deploy-laravel`** — deploy the environment's tracked branch →
+follow the deployment to completion (failing loudly with the reason and log
+tail) → run the migrations. One command:
 
 ```bash
 swamp workflow run "@craftquest/deploy-laravel" \
   --input '{"environment_id": "<env id>"}'
 ```
 
-(`migrate_command` defaults to `php artisan migrate --force`.)
+**`@craftquest/safe-deploy`** — the same pipeline, wrapped for apps with a
+managed queue: pause the queue so no worker picks up a job mid-migration →
+deploy → wait → migrate → resume. If any step fails, a separate cleanup job
+resumes the queue anyway, so a failed deploy never leaves your workers
+parked:
+
+```bash
+swamp workflow run "@craftquest/safe-deploy" \
+  --input '{"environment_id": "<env id>", "queue_instance_id": "<instance id>"}'
+```
+
+(`migrate_command` defaults to `php artisan migrate --force` in both.)
 
 Building your own workflow on these models is plain YAML — each step calls one
 model method:
@@ -259,8 +293,13 @@ from the shipped `deploy-laravel.yaml` and adjust. Use the `swamp` skill or
 - **Deletes are double-gated**: the confirm argument must exactly equal the
   target ID, _and_ the target must exist in synced/stored state — a guessed or
   mistyped ID cannot delete anything.
-- **`stop_environment` is gated only while the environment is running**, because
-  stopping a live site takes it offline; stopping an idle one needs no ceremony.
+- **`stop_environment` is gated unless the environment is already stopped.**
+  Laravel Cloud's environment statuses are `deploying`, `running`,
+  `hibernating` and `stopped` — and a hibernating environment has only scaled
+  to zero, so it still wakes on request. Stopping one is just as much an
+  outage as stopping a running site, so all three live states require
+  confirmation. Only stopping an already-stopped environment is ceremony-free,
+  because it changes nothing.
 - **Environment variable values never enter swamp state or logs.** GETs strip
   values (key names only are stored); sets pass values through a
   sensitive-marked argument.
@@ -294,9 +333,9 @@ from the shipped `deploy-laravel.yaml` and adjust. Use the `swamp` skill or
 
 ## Coverage
 
-Everything in the Laravel Cloud API except these deferred domains: WebSockets,
-usage, and dedicated clusters (plus the legacy Databases endpoints, superseded
-by clusters).
+Everything in the Laravel Cloud API except these deferred domains: WebSockets
+and dedicated clusters (plus the legacy Databases endpoints, superseded by
+clusters).
 
 ## License
 

@@ -43,7 +43,7 @@ const GlobalArgsSchema = z.object({
     .default("")
     .meta({ sensitive: true })
     .describe(
-      "JSON object for create_instance / create_background_process (see the Laravel Cloud API docs for required fields)",
+      'JSON object for create_instance / create_background_process. Background processes need config.connection and config.queue, e.g. {"type":"worker","processes":1,"command":"php artisan queue:work","config":{"connection":"sqs","queue":"default"}}',
     ),
   updatePayload: z
     .string()
@@ -146,6 +146,25 @@ const LC_API_BASE = "https://cloud.laravel.com/api";
 const SYNC_MAX_PAGES = 100;
 const EXCEPTION_CAP = 1000;
 
+// HTTP methods safe to replay after a 5xx: the server either performed the
+// operation or it didn't, and repeating it changes nothing further.
+const IDEMPOTENT_METHODS = ["GET", "HEAD", "PUT", "DELETE"];
+
+/**
+ * An HTTP-level failure from the Laravel Cloud API, carrying the status code
+ * so callers can react to it structurally rather than by matching on the
+ * response text.
+ */
+class LcApiError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "LcApiError";
+    this.status = status;
+  }
+}
+
 /**
  * Pause execution for the given number of milliseconds.
  */
@@ -154,10 +173,26 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
+ * Convert a Retry-After header (delay in seconds) to milliseconds, falling
+ * back to 2s when it is absent or not a usable number. A literal `0` is
+ * honored rather than treated as missing.
+ */
+function retryAfterMs(header: string | null): number {
+  const seconds = header === null ? Number.NaN : Number(header);
+  return (Number.isFinite(seconds) && seconds >= 0 ? seconds : 2) * 1000;
+}
+
+/**
  * Call the Laravel Cloud API with bearer auth and return the parsed JSON
- * body. Retries once on 429 (honoring Retry-After) and on 5xx. Errors carry
- * the HTTP status and truncated response body — never the token. With
- * `allowNotFound`, a 404 returns null (for idempotent deletes).
+ * body.
+ *
+ * Retry policy: a 429 is always retried once (honoring Retry-After) because
+ * the request was rejected before it ran. A 5xx is retried only for
+ * idempotent methods — a 5xx can arrive *after* Laravel Cloud already acted,
+ * so replaying a POST could purge a queue or create a second instance.
+ *
+ * Errors carry the HTTP status and truncated response body — never the
+ * token. With `allowNotFound`, a 404 returns null (for idempotent deletes).
  */
 async function lcApi(
   tokenArg: string,
@@ -179,6 +214,10 @@ async function lcApi(
   for (let attempt = 1;; attempt++) {
     const res = await fetch(url, {
       method,
+      // A JSON API that answers with a redirect is signalling a rejected
+      // request, not a resource move (Laravel bounces some failures to an
+      // HTML page). Surface the 3xx instead of chasing it into markup.
+      redirect: "manual",
       headers: {
         Authorization: `Bearer ${token}`,
         Accept: "application/json",
@@ -189,21 +228,39 @@ async function lcApi(
     const text = await res.text();
 
     if (res.ok) {
-      return text ? JSON.parse(text) : {};
+      if (!text) return {};
+      try {
+        return JSON.parse(text);
+      } catch {
+        throw new LcApiError(
+          `Laravel Cloud API ${method} ${path} returned a non-JSON body (${res.status}, content-type ${
+            res.headers.get("content-type") ?? "unknown"
+          }): ${text.slice(0, 200)}`,
+          res.status,
+        );
+      }
+    }
+    if (res.status >= 300 && res.status < 400) {
+      throw new LcApiError(
+        `Laravel Cloud API ${method} ${path} redirected (${res.status}) instead of returning JSON — the request was rejected, commonly by validation.`,
+        res.status,
+      );
     }
     if (res.status === 404 && opts.allowNotFound) {
       return null;
     }
-    const retryable = res.status === 429 || res.status >= 500;
+    const retryable = res.status === 429 ||
+      (res.status >= 500 &&
+        IDEMPOTENT_METHODS.includes(method.toUpperCase()));
     if (retryable && attempt === 1) {
-      const retryAfter = Number(res.headers.get("Retry-After")) || 2;
-      await sleep(retryAfter * 1000);
+      await sleep(retryAfterMs(res.headers.get("Retry-After")));
       continue;
     }
-    throw new Error(
+    throw new LcApiError(
       `Laravel Cloud API ${method} ${path} failed (${res.status}): ${
         text.slice(0, 500)
       }`,
+      res.status,
     );
   }
 }
@@ -341,6 +398,25 @@ function requireConfirm(
 }
 
 /**
+ * Decide whether a failed state-transition call actually means "the instance
+ * is already in the state you asked for" — which is success, not failure.
+ *
+ * Laravel Cloud signals this with a 409 Conflict; the phrase list is a
+ * secondary signal kept for older/alternate responses. Matching the status
+ * first means a reworded message alone cannot turn pause/resume back into a
+ * hard failure — which matters because @craftquest/safe-deploy's cleanup job
+ * depends on resume_queue succeeding to un-park a deploy that failed.
+ *
+ * Every caller re-fetches the instance afterwards, so if this guess is ever
+ * wrong the stored state still reflects reality.
+ */
+function isAlreadyInDesiredState(err: unknown, phrases: string[]): boolean {
+  if (err instanceof LcApiError && err.status === 409) return true;
+  const message = err instanceof Error ? err.message : "";
+  return phrases.some((phrase) => message.includes(phrase));
+}
+
+/**
  * Read the stored instances list and require the target to be in it.
  */
 async function requireKnownInstance(
@@ -398,7 +474,7 @@ async function fetchAndWriteInstance(
  */
 export const model = {
   type: "@craftquest/laravel-cloud/queues",
-  version: "2026.08.10.6",
+  version: "2026.08.12.2",
   upgrades: [
     {
       toVersion: "2026.08.10.3",
@@ -421,6 +497,24 @@ export const model = {
       toVersion: "2026.08.10.6",
       description:
         "README leads with the agent-first interface; no code changes",
+      upgradeAttributes: (old: Record<string, unknown>) => old,
+    },
+    {
+      toVersion: "2026.08.11.1",
+      description:
+        "5xx retries restricted to idempotent methods (a replayed POST could purge a queue or create a second instance), and pause/resume/set_default idempotency now keys on a 409 rather than only on API message text; no schema changes",
+      upgradeAttributes: (old: Record<string, unknown>) => old,
+    },
+    {
+      toVersion: "2026.08.12.1",
+      description:
+        "Version bump alongside the metrics fix in the apps and data models; no schema changes",
+      upgradeAttributes: (old: Record<string, unknown>) => old,
+    },
+    {
+      toVersion: "2026.08.12.2",
+      description:
+        "Background-process requirements documented from live verification — config.connection and config.queue are required, and they do not attach to managed_queue instances; no schema changes",
       upgradeAttributes: (old: Record<string, unknown>) => old,
     },
   ],
@@ -712,9 +806,9 @@ export const model = {
           `/instances/${instanceId}/pause`,
         ).then(() => {
           context.logger.info("Queue {id} paused", { id: instanceId });
-        }).catch((err: Error) => {
+        }).catch((err: unknown) => {
           // idempotent: already-paused is success, not failure
-          if (!err.message.includes("already paused")) throw err;
+          if (!isAlreadyInDesiredState(err, ["already paused"])) throw err;
           context.logger.info("Queue {id} was already paused", {
             id: instanceId,
           });
@@ -739,11 +833,10 @@ export const model = {
           `/instances/${instanceId}/resume`,
         ).then(() => {
           context.logger.info("Queue {id} resumed", { id: instanceId });
-        }).catch((err: Error) => {
+        }).catch((err: unknown) => {
           // idempotent: not-paused is success, not failure
           if (
-            !err.message.includes("not paused") &&
-            !err.message.includes("already running")
+            !isAlreadyInDesiredState(err, ["not paused", "already running"])
           ) {
             throw err;
           }
@@ -800,9 +893,9 @@ export const model = {
           context.logger.info("Queue {id} is now the default", {
             id: instanceId,
           });
-        }).catch((err: Error) => {
+        }).catch((err: unknown) => {
           // idempotent: already-default is success, not failure
-          if (!err.message.includes("already the default")) throw err;
+          if (!isAlreadyInDesiredState(err, ["already the default"])) throw err;
           context.logger.info("Queue {id} was already the default", {
             id: instanceId,
           });
@@ -954,7 +1047,7 @@ export const model = {
 
     create_background_process: {
       description:
-        "Create a background process on an instance (instanceId + createPayload arguments; required: type, processes)",
+        'Create a background process on an app/service/queue instance (instanceId + createPayload). Live-verified required shape: {"type":"worker","processes":1,"command":"php artisan queue:work","config":{"connection":"sqs","queue":"default"}} — config.connection and config.queue are required. NOT available on managed_queue instances, which take background_processes at creation instead.',
       arguments: z.object({}),
       execute: async (_args: unknown, context: Context) => {
         const { laravelCloudToken, createPayload } = context.globalArgs;
@@ -989,7 +1082,7 @@ export const model = {
 
     update_background_process: {
       description:
-        "Update a background process (processId + updatePayload arguments)",
+        "Update a background process (processId + updatePayload arguments). The live-verified call sent the whole definition — type, processes, command and config.connection/config.queue — so send the full shape rather than only the field you are changing.",
       arguments: z.object({}),
       execute: async (_args: unknown, context: Context) => {
         const { laravelCloudToken, updatePayload } = context.globalArgs;

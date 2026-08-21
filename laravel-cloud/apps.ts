@@ -26,7 +26,7 @@ const GlobalArgsSchema = z.object({
     .string()
     .default("")
     .describe(
-      "Safety gate for delete_environment, and for stop_environment while the environment is running",
+      "Safety gate for delete_environment, and for stop_environment unless the environment is already stopped",
     ),
   deploymentId: z
     .string()
@@ -287,10 +287,27 @@ const EnvironmentLogsSchema = z.object({
 
 const MetricSeriesSchema = z.object({
   name: z.string(),
-  labels: z.array(z.string()),
-  average: z.array(z.number()),
   pointCount: z.number(),
+  labels: z
+    .array(z.string())
+    .describe("Sub-series labels; empty when the endpoint doesn't label"),
+  average: z
+    .array(z.number())
+    .describe("Averages, one per label; a scalar average becomes one entry"),
+  // Scalar summaries the cluster/cache endpoints use instead of averages.
+  // Optional so snapshots written before 2026.08.12.1 still read back.
+  total: z.number().nullable().optional(),
+  current: z.number().nullable().optional(),
+  min: z.number().nullable().optional(),
+  max: z.number().nullable().optional(),
+  latest: z
+    .number()
+    .nullable()
+    .optional()
+    .describe("y of the most recent point, when it is a plain number"),
 });
+
+type MetricSeries = z.infer<typeof MetricSeriesSchema>;
 
 const EnvironmentMetricsSchema = z.object({
   environmentId: z.string(),
@@ -377,12 +394,35 @@ const DEPLOY_POLL_ATTEMPTS = 90;
 const COMMAND_POLL_INTERVAL_MS = 5000;
 const COMMAND_POLL_ATTEMPTS = 60;
 
+// HTTP methods safe to replay after a 5xx: the server either performed the
+// operation or it didn't, and repeating it changes nothing further.
+const IDEMPOTENT_METHODS = ["GET", "HEAD", "PUT", "DELETE"];
+
+// The only EnvironmentStatus (deploying|running|hibernating|stopped) from
+// which stopping is a no-op rather than an outage.
+const ENV_STATUS_STOPPED = "stopped";
+
 const DEPLOY_TERMINAL_FAILURES = [
   "build.failed",
   "deployment.failed",
   "failed",
   "cancelled",
 ];
+
+/**
+ * An HTTP-level failure from the Laravel Cloud API, carrying the status code
+ * so callers can react to it structurally rather than by matching on the
+ * response text.
+ */
+class LcApiError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "LcApiError";
+    this.status = status;
+  }
+}
 
 /**
  * Pause execution for the given number of milliseconds.
@@ -392,10 +432,27 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
+ * Convert a Retry-After header (delay in seconds) to milliseconds, falling
+ * back to 2s when it is absent or not a usable number. A literal `0` is
+ * honored rather than treated as missing.
+ */
+function retryAfterMs(header: string | null): number {
+  const seconds = header === null ? Number.NaN : Number(header);
+  return (Number.isFinite(seconds) && seconds >= 0 ? seconds : 2) * 1000;
+}
+
+/**
  * Call the Laravel Cloud API with bearer auth and return the parsed JSON
- * body. Retries once on 429 (honoring Retry-After) and on 5xx. Errors carry
- * the HTTP status and truncated response body — never the token. With
- * `allowNotFound`, a 404 returns null (for idempotent deletes).
+ * body.
+ *
+ * Retry policy: a 429 is always retried once (honoring Retry-After) because
+ * the request was rejected before it ran. A 5xx is retried only for
+ * idempotent methods — a 5xx can arrive *after* Laravel Cloud already acted,
+ * so replaying a POST could create a second application, deployment, or
+ * command run.
+ *
+ * Errors carry the HTTP status and truncated response body — never the
+ * token. With `allowNotFound`, a 404 returns null (for idempotent deletes).
  */
 async function lcApi(
   tokenArg: string,
@@ -423,6 +480,10 @@ async function lcApi(
     if (!opts.form) headers["Content-Type"] = "application/json";
     const res = await fetch(url, {
       method,
+      // A JSON API that answers with a redirect is signalling a rejected
+      // request, not a resource move (Laravel bounces some failures to an
+      // HTML page). Surface the 3xx instead of chasing it into markup.
+      redirect: "manual",
       headers,
       body: opts.form ??
         (body === undefined ? undefined : JSON.stringify(body)),
@@ -430,21 +491,39 @@ async function lcApi(
     const text = await res.text();
 
     if (res.ok) {
-      return text ? JSON.parse(text) : {};
+      if (!text) return {};
+      try {
+        return JSON.parse(text);
+      } catch {
+        throw new LcApiError(
+          `Laravel Cloud API ${method} ${path} returned a non-JSON body (${res.status}, content-type ${
+            res.headers.get("content-type") ?? "unknown"
+          }): ${text.slice(0, 200)}`,
+          res.status,
+        );
+      }
+    }
+    if (res.status >= 300 && res.status < 400) {
+      throw new LcApiError(
+        `Laravel Cloud API ${method} ${path} redirected (${res.status}) instead of returning JSON — the request was rejected, commonly by validation.`,
+        res.status,
+      );
     }
     if (res.status === 404 && opts.allowNotFound) {
       return null;
     }
-    const retryable = res.status === 429 || res.status >= 500;
+    const retryable = res.status === 429 ||
+      (res.status >= 500 &&
+        IDEMPOTENT_METHODS.includes(method.toUpperCase()));
     if (retryable && attempt === 1) {
-      const retryAfter = Number(res.headers.get("Retry-After")) || 2;
-      await sleep(retryAfter * 1000);
+      await sleep(retryAfterMs(res.headers.get("Retry-After")));
       continue;
     }
-    throw new Error(
+    throw new LcApiError(
       `Laravel Cloud API ${method} ${path} failed (${res.status}): ${
         text.slice(0, 500)
       }`,
+      res.status,
     );
   }
 }
@@ -513,6 +592,12 @@ function toEnvironmentSummary(
  */
 function toEnvironmentDetail(raw: Json): z.infer<typeof EnvironmentSchema> {
   const a = raw.attributes ?? {};
+  // Laravel Cloud serializes the environment-variables block under an
+  // attribute key that is the EMPTY STRING — that is not a typo here, it is
+  // in their published OpenAPI spec (EnvironmentResource.attributes has a
+  // `""` property whose anyOf is {environment_variables: [...]} or an empty
+  // array when there are none). Prefer the sensibly-named key in case they
+  // ever fix it, then fall back to the quirk.
   const envVars: Json[] = Array.isArray(a.environment_variables)
     ? a.environment_variables
     : (a[""]?.environment_variables ?? []);
@@ -628,17 +713,47 @@ function parseUpdatePayload(value: string, method: string): Json {
 
 /**
  * Summarize the API's named metric series into a compact, schema-stable
- * shape: series name, labels, averages, and the number of data points.
+ * shape.
+ *
+ * The two metrics endpoints do NOT agree on a shape, both verified live on
+ * 2026-08-12:
+ *
+ * - `/environments/{id}/metrics` labels its sub-series —
+ *   `{labels: ["1/2/3XX","4XX","5XX"], average: [0,0,0], data: [...]}`
+ * - `/databases/clusters/{id}/metrics` and the cache equivalent use scalar
+ *   summaries whose field name varies per metric — `{data: [], average: 0}`,
+ *   `{data: [...], total: 0.01}`, `{data: [], current: 0, min: 0, max: 0}` —
+ *   and `replica_lag` arrives as a bare array with no summary at all.
+ *
+ * Both are normalized here without discarding either: labelled averages stay
+ * an array (a lone scalar average becomes a single entry), and the scalar
+ * summaries are carried alongside. Nothing is assumed to be an array, and a
+ * non-numeric value becomes null rather than throwing or coercing to 0.
  */
-function summarizeMetrics(
-  data: Json,
-): { name: string; labels: string[]; average: number[]; pointCount: number }[] {
-  return Object.entries(data ?? {}).map(([name, s]: [string, Json]) => ({
-    name,
-    labels: (s?.labels ?? []).map(String),
-    average: (s?.average ?? []).map((n: Json) => Number(n) || 0),
-    pointCount: (s?.data ?? []).length,
-  }));
+function summarizeMetrics(data: Json): MetricSeries[] {
+  const num = (v: Json): number | null =>
+    typeof v === "number" && Number.isFinite(v) ? v : null;
+  const numArray = (v: Json): number[] => {
+    if (Array.isArray(v)) return v.map((n: Json) => num(n) ?? 0);
+    const scalar = num(v);
+    return scalar === null ? [] : [scalar];
+  };
+  return Object.entries(data ?? {}).map(([name, raw]: [string, Json]) => {
+    const series: Json = Array.isArray(raw) || raw == null ? {} : raw;
+    const points: Json[] = Array.isArray(series.data) ? series.data : [];
+    const last = points.length ? points[points.length - 1] : undefined;
+    return {
+      name,
+      pointCount: points.length,
+      labels: Array.isArray(series.labels) ? series.labels.map(String) : [],
+      average: numArray(series.average),
+      total: num(series.total),
+      current: num(series.current),
+      min: num(series.min),
+      max: num(series.max),
+      latest: num(last?.y),
+    };
+  });
 }
 
 /**
@@ -703,7 +818,7 @@ async function fetchAndWriteEnvironment(
 export const model = {
   type: "@craftquest/laravel-cloud/apps",
   reports: ["@craftquest/laravel-cloud-usage"],
-  version: "2026.08.10.6",
+  version: "2026.08.12.2",
   upgrades: [
     {
       toVersion: "2026.08.10.2",
@@ -732,6 +847,24 @@ export const model = {
       toVersion: "2026.08.10.6",
       description:
         "README leads with the agent-first interface; no code changes",
+      upgradeAttributes: (old: Record<string, unknown>) => old,
+    },
+    {
+      toVersion: "2026.08.11.1",
+      description:
+        "5xx retries restricted to idempotent methods (a replayed POST could create a second app, deployment, or command run), and stop_environment now gates every status except 'stopped' — a hibernating environment still serves traffic; no schema changes",
+      upgradeAttributes: (old: Record<string, unknown>) => old,
+    },
+    {
+      toVersion: "2026.08.12.1",
+      description:
+        "Metrics fix: the environment endpoint labels its sub-series while the cluster/cache endpoints return scalar summaries; summarizeMetrics now normalizes both instead of assuming arrays, which made get_*_metrics throw on real cluster data. Series gain optional total/current/min/max/latest; snapshots written earlier still read back",
+      upgradeAttributes: (old: Record<string, unknown>) => old,
+    },
+    {
+      toVersion: "2026.08.12.2",
+      description:
+        "Non-JSON and redirect responses now surface as explicit rejections instead of a JSON parse error; live coverage round documented; no schema changes",
       upgradeAttributes: (old: Record<string, unknown>) => old,
     },
   ],
@@ -1132,7 +1265,7 @@ export const model = {
 
     stop_environment: {
       description:
-        "Stop an environment. Gated only while it is running: then confirmEnvironmentId must match — stopping a live site takes it offline.",
+        "Stop an environment. Gated unless it is already stopped: confirmEnvironmentId must match, because stopping a running, hibernating, or mid-deploy environment takes the site offline.",
       arguments: z.object({}),
       execute: async (_args: unknown, context: Context) => {
         const { laravelCloudToken, confirmEnvironmentId } = context.globalArgs;
@@ -1148,9 +1281,18 @@ export const model = {
         );
         const status = requireData(current, `environment ${environmentId}`)
           .attributes?.status;
-        if (status === "running" && confirmEnvironmentId !== environmentId) {
+        // The API's EnvironmentStatus enum is deploying|running|hibernating|
+        // stopped. Everything except "stopped" is a live site: a hibernating
+        // environment has scaled to zero but still wakes on request, so
+        // stopping it takes the site down just as surely as stopping a
+        // running one. Gate on "not already stopped" rather than listing the
+        // live states, so an unknown future status fails safe.
+        if (
+          status !== ENV_STATUS_STOPPED &&
+          confirmEnvironmentId !== environmentId
+        ) {
           throw new Error(
-            `Stop refused: environment ${environmentId} is running — stopping takes the site offline. ` +
+            `Stop refused: environment ${environmentId} is '${status}' — stopping takes the site offline. ` +
               "Re-state the exact environment ID in confirmEnvironmentId to confirm.",
           );
         }

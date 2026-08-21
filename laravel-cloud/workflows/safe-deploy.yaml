@@ -26,7 +26,7 @@ inputs:
     confirm_environment_id:
       type: string
       default: ""
-      description: Safety gate for delete_environment / stop_environment (while running)
+      description: Safety gate for delete_environment / stop_environment (unless already stopped)
     deployment_id:
       type: string
       default: ""

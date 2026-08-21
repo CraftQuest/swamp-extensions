@@ -1,5 +1,5 @@
 import { assert, assertEquals, assertRejects } from "jsr:@std/assert@1";
-import { createModelTestContext } from "jsr:@systeminit/swamp-testing";
+import { createModelTestContext } from "jsr:@systeminit/swamp-testing@0.20260604.20";
 import { model } from "./queues.ts";
 
 // --- Fetch mocking ---
@@ -364,5 +364,101 @@ Deno.test("background process lifecycle: create, list, gated delete", async () =
     () => model.methods.delete_background_process.execute({}, gate.context),
     Error,
     "confirmProcessId does not match",
+  );
+});
+
+// --- Retry policy (lcApi is duplicated per model — pin it in each) ---
+
+Deno.test("queues: 5xx retried for GET, never replayed for POST", async () => {
+  const { context } = createModelTestContext({
+    globalArgs: args({ environmentId: "env-1" }),
+  });
+  await withMockedFetch(
+    [
+      { status: 503, body: {}, headers: { "Retry-After": "0" } },
+      { status: 200, body: { data: [rawInstance("i-1")], links: {} } },
+    ],
+    async (calls) => {
+      await model.methods.list_instances.execute({}, context);
+      assertEquals(calls.length, 2);
+    },
+  );
+
+  // A replayed POST could discard a second round of jobs.
+  const purge = createModelTestContext({
+    globalArgs: args({ instanceId: "i-1", confirmInstanceId: "i-1" }),
+    storedResources: {
+      instances: {
+        environmentId: "env-1",
+        instances: [{ id: "i-1", name: "worker", instanceType: "managed_queue" }],
+        instanceCount: 1,
+        syncedAt: "2026-08-10T00:00:00Z",
+      },
+    },
+  });
+  await withMockedFetch(
+    [
+      { status: 502, body: {}, headers: { "Retry-After": "0" } },
+      { status: 200, body: { data: rawInstance("i-1") } },
+    ],
+    async (calls) => {
+      await assertRejects(
+        () => model.methods.purge_queue.execute({}, purge.context),
+        Error,
+        "(502)",
+      );
+      assertEquals(calls.length, 1);
+    },
+  );
+});
+
+// --- Idempotency guards: status first, message second ---
+
+Deno.test("pause_queue treats a 409 as already-paused even with an unfamiliar message", async () => {
+  const { context } = createModelTestContext({
+    globalArgs: args({ instanceId: "i-1" }),
+  });
+  await withMockedFetch(
+    [
+      // Wording the extension has never seen — only the 409 identifies it.
+      { status: 409, body: { message: "queue is in a paused state already" } },
+      { status: 200, body: { data: rawInstance("i-1", { paused: true }) } },
+    ],
+    async (calls) => {
+      await model.methods.pause_queue.execute({}, context);
+      assertEquals(calls.length, 2); // swallowed, then re-fetched
+    },
+  );
+});
+
+Deno.test("resume_queue still honors the legacy message when there is no 409", async () => {
+  const { context } = createModelTestContext({
+    globalArgs: args({ instanceId: "i-1" }),
+  });
+  await withMockedFetch(
+    [
+      { status: 422, body: { message: "instance is not paused" } },
+      { status: 200, body: { data: rawInstance("i-1") } },
+    ],
+    async (calls) => {
+      await model.methods.resume_queue.execute({}, context);
+      assertEquals(calls.length, 2);
+    },
+  );
+});
+
+Deno.test("a genuine queue failure still propagates", async () => {
+  const { context } = createModelTestContext({
+    globalArgs: args({ instanceId: "i-1" }),
+  });
+  await withMockedFetch(
+    [{ status: 403, body: { message: "insufficient permissions" } }],
+    async () => {
+      await assertRejects(
+        () => model.methods.pause_queue.execute({}, context),
+        Error,
+        "(403)",
+      );
+    },
   );
 });

@@ -27,6 +27,20 @@ function usd(cents: number | undefined | null): string {
   return `$${((cents ?? 0) / 100).toFixed(2)}`;
 }
 
+/** How many rows each table renders before it says so. */
+const APP_ROW_CAP = 15;
+const RESOURCE_ROW_CAP = 20;
+
+/**
+ * Note omitted rows when a table is capped, so a truncated digest never
+ * reads as a complete one.
+ */
+function truncationNote(shown: number, total: number, noun: string): string[] {
+  return total > shown
+    ? [`\n_Showing the top ${shown} of ${total} ${noun}._`]
+    : [];
+}
+
 /**
  * Spend/usage digest for @craftquest/laravel-cloud. Method-scoped:
  * summarizes the `usage` resource a get_usage execution produced —
@@ -87,9 +101,12 @@ export const report = {
       const sorted = [...usage.applications].sort(
         (a: Json, b: Json) => b.totalCents - a.totalCents,
       );
-      for (const a of sorted.slice(0, 15)) {
+      for (const a of sorted.slice(0, APP_ROW_CAP)) {
         lines.push(`| ${a.name} | ${usd(a.totalCents)} |`);
       }
+      lines.push(
+        ...truncationNote(APP_ROW_CAP, sorted.length, "applications by spend"),
+      );
     }
 
     if ((usage.resourceLines ?? []).length) {
@@ -98,13 +115,20 @@ export const report = {
         "| Kind | Name | Cost |",
         "| ---- | ---- | ---- |",
       );
-      for (const r of usage.resourceLines.slice(0, 20)) {
+      for (const r of usage.resourceLines.slice(0, RESOURCE_ROW_CAP)) {
         lines.push(
           `| ${r.kind} | ${r.name ?? ""} | ${
             r.totalCents !== undefined ? usd(r.totalCents) : ""
           } |`,
         );
       }
+      lines.push(
+        ...truncationNote(
+          RESOURCE_ROW_CAP,
+          usage.resourceLines.length,
+          "resource lines",
+        ),
+      );
     }
 
     if ((usage.addons ?? []).length) {

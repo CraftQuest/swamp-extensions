@@ -1,5 +1,5 @@
 import { assert, assertEquals, assertRejects } from "jsr:@std/assert@1";
-import { createModelTestContext } from "jsr:@systeminit/swamp-testing";
+import { createModelTestContext } from "jsr:@systeminit/swamp-testing@0.20260604.20";
 import { model } from "./apps.ts";
 
 // --- Fetch mocking ---
@@ -28,7 +28,17 @@ async function withMockedFetch(
     calls.push({
       url: String(input),
       method: init?.method ?? "GET",
-      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+      // Not every body is JSON — upload_avatar sends FormData. Record what
+      // we can rather than throwing inside the mock itself.
+      body: init?.body === undefined || init?.body === null
+        ? undefined
+        : (() => {
+          try {
+            return JSON.parse(String(init.body));
+          } catch {
+            return String(init.body);
+          }
+        })(),
     });
     const next = queue.shift();
     if (!next) {
@@ -300,6 +310,62 @@ Deno.test("delete_app deletes a confirmed, known app and updates the catalog", a
   assertEquals(getWrittenResources()[0].data.appCount, 1);
 });
 
+Deno.test("delete_environment is gated on confirmation and the stored app detail", async () => {
+  const storedApp = {
+    id: "a-1",
+    name: "demo-app",
+    slug: "demo-app",
+    region: "us-east-2",
+    environments: [
+      { id: "env-1", name: "production", slug: "production", status: "running" },
+      { id: "env-2", name: "staging", slug: "staging", status: "stopped" },
+    ],
+    updatedAt: "2026-08-09T00:00:00Z",
+  };
+
+  const mismatch = createModelTestContext({
+    globalArgs: args({ environmentId: "env-1", confirmEnvironmentId: "env-2" }),
+    storedResources: { app: storedApp },
+  });
+  await withMockedFetch([], async (calls) => {
+    await assertRejects(
+      () => model.methods.delete_environment.execute({}, mismatch.context),
+      Error,
+      "confirmEnvironmentId does not match",
+    );
+    assertEquals(calls.length, 0);
+  });
+
+  const unknown = createModelTestContext({
+    globalArgs: args({ environmentId: "ghost", confirmEnvironmentId: "ghost" }),
+    storedResources: { app: storedApp },
+  });
+  await withMockedFetch([], async (calls) => {
+    await assertRejects(
+      () => model.methods.delete_environment.execute({}, unknown.context),
+      Error,
+      "not in the stored app detail",
+    );
+    assertEquals(calls.length, 0);
+  });
+
+  // confirmed + known: deletes and drops the environment from the app detail
+  const ok = createModelTestContext({
+    globalArgs: args({ environmentId: "env-1", confirmEnvironmentId: "env-1" }),
+    storedResources: { app: storedApp },
+  });
+  await withMockedFetch([{ status: 204 }], async (calls) => {
+    await model.methods.delete_environment.execute({}, ok.context);
+    assertEquals(calls[0].method, "DELETE");
+    assert(calls[0].url.endsWith("/environments/env-1"));
+  });
+  const written = ok.getWrittenResources();
+  assertEquals(written[0].specName, "app");
+  assertEquals(written[0].data.environments, [
+    { id: "env-2", name: "staging", slug: "staging", status: "stopped" },
+  ]);
+});
+
 // --- get_environment: THE env var stripping test ---
 
 Deno.test("get_environment stores env var KEY NAMES only — values never in state or logs", async () => {
@@ -377,7 +443,48 @@ Deno.test("stop_environment stops a running env with confirmation, and a stopped
     ],
     async (calls) => {
       await model.methods.stop_environment.execute({}, idle.context);
-      assertEquals(calls.length, 3); // no refusal for a non-running env
+      assertEquals(calls.length, 3); // already stopped — nothing to confirm
+    },
+  );
+});
+
+Deno.test("stop_environment gates hibernating and deploying environments too", async () => {
+  // EnvironmentStatus is deploying|running|hibernating|stopped. A hibernating
+  // environment has scaled to zero but still wakes on request, so stopping it
+  // is an outage — it must be gated exactly like a running one.
+  for (const status of ["hibernating", "deploying"]) {
+    const { context } = createModelTestContext({
+      globalArgs: args({ environmentId: "env-1" }),
+    });
+    await withMockedFetch(
+      [{ status: 200, body: { data: rawEnvironment("env-1", { status }) } }],
+      async (calls) => {
+        await assertRejects(
+          () => model.methods.stop_environment.execute({}, context),
+          Error,
+          status,
+        );
+        assertEquals(calls.length, 1); // status check only, stop never sent
+      },
+    );
+  }
+
+  // An unrecognized future status must fail safe rather than stop silently.
+  const unknown = createModelTestContext({
+    globalArgs: args({ environmentId: "env-1" }),
+  });
+  await withMockedFetch(
+    [{
+      status: 200,
+      body: { data: rawEnvironment("env-1", { status: "some_new_state" }) },
+    }],
+    async (calls) => {
+      await assertRejects(
+        () => model.methods.stop_environment.execute({}, unknown.context),
+        Error,
+        "Stop refused",
+      );
+      assertEquals(calls.length, 1);
     },
   );
 });
@@ -669,14 +776,20 @@ Deno.test("get_environment_metrics summarizes named series", async () => {
   await withMockedFetch(
     [{
       status: 200,
+      // The ENVIRONMENT endpoint labels its sub-series and returns parallel
+      // average arrays — captured from a live environment on 2026-08-10.
       body: {
         data: {
           cpu_usage: {
-            labels: ["app"],
+            labels: ["App"],
             average: [12.5],
-            data: [{ x: "t1", y: [10] }, { x: "t2", y: [15] }],
+            data: [{ x: "t1", y: 10 }, { x: "t2", y: 15 }],
           },
-          memory_usage: { labels: ["app"], average: [40], data: [] },
+          http_response_count: {
+            labels: ["1/2/3XX", "4XX", "5XX"],
+            average: [0, 0, 0],
+            data: [],
+          },
         },
       },
     }],
@@ -685,12 +798,51 @@ Deno.test("get_environment_metrics summarizes named series", async () => {
       assert(calls[0].url.includes("period=24h"));
     },
   );
-  // deno-lint-ignore no-explicit-any
-  const series = getWrittenResources()[0].data.series as any;
+  const series = getWrittenResources()[0].data.series as Record<
+    string,
+    unknown
+  >[];
   assertEquals(series.length, 2);
   assertEquals(series[0].name, "cpu_usage");
+  assertEquals(series[0].labels, ["App"]);
   assertEquals(series[0].average, [12.5]);
   assertEquals(series[0].pointCount, 2);
+  assertEquals(series[0].latest, 15);
+  // multi-label series keep every average, one per label
+  assertEquals(series[1].labels, ["1/2/3XX", "4XX", "5XX"]);
+  assertEquals(series[1].average, [0, 0, 0]);
+});
+
+Deno.test("environment metrics tolerate the cluster endpoint's scalar shape", async () => {
+  // The two endpoints disagree; neither should be able to break the other.
+  const { context, getWrittenResources } = createModelTestContext({
+    globalArgs: args({ environmentId: "env-1" }),
+  });
+  await withMockedFetch(
+    [{
+      status: 200,
+      body: {
+        data: {
+          cpu_usage: { data: [], average: 0 },
+          writes: { data: [{ x: "t", y: 3 }], total: 7 },
+          replica_lag: [],
+        },
+      },
+    }],
+    async () => {
+      await model.methods.get_environment_metrics.execute({}, context);
+    },
+  );
+  const series = getWrittenResources()[0].data.series as Record<
+    string,
+    unknown
+  >[];
+  // a scalar average of 0 becomes a single-entry array, not a crash
+  assertEquals(series[0].average, [0]);
+  assertEquals(series[0].labels, []);
+  assertEquals(series[1].total, 7);
+  assertEquals(series[1].latest, 3);
+  assertEquals(series[2].pointCount, 0);
 });
 
 Deno.test("list_regions stores the region catalog", async () => {
@@ -706,11 +858,8 @@ Deno.test("list_regions stores the region catalog", async () => {
       await model.methods.list_regions.execute({}, context);
     },
   );
-  // deno-lint-ignore no-explicit-any
-  assertEquals(
-    (getWrittenResources()[0].data.regions as any)[0].region,
-    "us-east-2",
-  );
+  const regions = getWrittenResources()[0].data.regions as { region: string }[];
+  assertEquals(regions[0].region, "us-east-2");
 });
 
 // --- usage ---
@@ -839,6 +988,63 @@ Deno.test("token falls back to the LARAVEL_CLOUD_TOKEN env var", async () => {
   }
 });
 
+// --- Retry policy ---
+
+Deno.test("a 5xx is retried for GET but never replayed for POST", async () => {
+  // GET: safe to replay — the second attempt's payload is the one used.
+  const { context, getWrittenResources } = createModelTestContext({
+    globalArgs: args(),
+  });
+  await withMockedFetch(
+    [
+      { status: 503, body: {}, headers: { "Retry-After": "0" } },
+      { status: 200, body: { data: [rawApp("app-1")], links: {} } },
+    ],
+    async (calls) => {
+      await model.methods.sync_apps.execute({}, context);
+      assertEquals(calls.length, 2);
+    },
+  );
+  assertEquals(getWrittenResources()[0].data.appCount, 1);
+
+  // POST: a 5xx may land AFTER Laravel Cloud created the deployment, so the
+  // request must fail rather than risk a second deployment.
+  const { context: postContext } = createModelTestContext({
+    globalArgs: args({ environmentId: "env-1" }),
+  });
+  await withMockedFetch(
+    [
+      { status: 502, body: {}, headers: { "Retry-After": "0" } },
+      { status: 200, body: { data: rawDeployment("dep-1", "queued") } },
+    ],
+    async (calls) => {
+      await assertRejects(
+        () => model.methods.deploy.execute({}, postContext),
+        Error,
+        "(502)",
+      );
+      assertEquals(calls.length, 1); // no replay
+    },
+  );
+});
+
+Deno.test("a 429 is retried even for POST — the request never ran", async () => {
+  const { context, getWrittenResources } = createModelTestContext({
+    globalArgs: args({ environmentId: "env-1" }),
+  });
+  await withMockedFetch(
+    [
+      { status: 429, body: {}, headers: { "Retry-After": "0" } },
+      { status: 200, body: { data: rawDeployment("dep-1", "queued") } },
+    ],
+    async (calls) => {
+      await model.methods.deploy.execute({}, context);
+      assertEquals(calls.length, 2);
+    },
+  );
+  assertEquals(getWrittenResources()[0].data.id, "dep-1");
+});
+
 Deno.test("with no vault token and no env var, methods still refuse", async () => {
   Deno.env.delete("LARAVEL_CLOUD_TOKEN");
   const { context } = createModelTestContext({
@@ -849,4 +1055,46 @@ Deno.test("with no vault token and no env var, methods still refuse", async () =
     Error,
     "No Laravel Cloud token",
   );
+});
+
+// --- Non-JSON / redirect responses ---
+
+Deno.test("a redirect instead of JSON is reported as a rejection, not a parse error", async () => {
+  // upload_avatar hit this live: Laravel Cloud answers a rejected multipart
+  // upload with a 302 to an HTML page, which used to surface as
+  // "Unexpected token '<'".
+  const { context } = createModelTestContext({
+    globalArgs: args({ appId: "a-1", avatarPath: "/dev/null" }),
+  });
+  await withMockedFetch(
+    [{ status: 302, body: {}, headers: { location: "/login" } }],
+    async () => {
+      await assertRejects(
+        () => model.methods.upload_avatar.execute({}, context),
+        Error,
+        "redirected (302)",
+      );
+    },
+  );
+});
+
+Deno.test("an HTML body on a 200 is reported with its content type", async () => {
+  const { context } = createModelTestContext({ globalArgs: args() });
+  const original = globalThis.fetch;
+  globalThis.fetch = (() =>
+    Promise.resolve(
+      new Response("<!DOCTYPE html><html>nope</html>", {
+        status: 200,
+        headers: { "content-type": "text/html; charset=utf-8" },
+      }),
+    )) as typeof fetch;
+  try {
+    await assertRejects(
+      () => model.methods.sync_apps.execute({}, context),
+      Error,
+      "non-JSON body",
+    );
+  } finally {
+    globalThis.fetch = original;
+  }
 });

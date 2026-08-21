@@ -74,3 +74,47 @@ Deno.test("usage report renders spend, credits, and tables", async () => {
   assert(result.markdown.includes("| databases | main-db | $4.00 |"));
   assertEquals(result.json.currentSpendCents, 1234);
 });
+
+Deno.test("usage report says so when it caps a table", async () => {
+  const result = await report.execute(
+    reportContext({
+      usage: {
+        currentSpendCents: 100_000,
+        applicationTotalCents: 100_000,
+        applicationCount: 22,
+        applications: Array.from({ length: 22 }, (_, i) => ({
+          name: `app-${i}`,
+          totalCents: (22 - i) * 100,
+        })),
+        addons: [],
+        resourceLines: Array.from({ length: 25 }, (_, i) => ({
+          kind: "databases",
+          name: `db-${i}`,
+          totalCents: 100,
+        })),
+        resourceTotalCents: 2500,
+        syncedAt: "2026-08-11T00:00:00Z",
+      },
+    }),
+  );
+  // 15 of 22 applications, 20 of 25 resource lines — both disclosed
+  assert(result.markdown.includes("Showing the top 15 of 22 applications"));
+  assert(result.markdown.includes("Showing the top 20 of 25 resource lines"));
+  assert(result.markdown.includes("| app-0 |")); // most expensive kept
+  assert(!result.markdown.includes("| app-21 |")); // cheapest dropped
+});
+
+Deno.test("usage report adds no note when nothing is truncated", async () => {
+  const result = await report.execute(
+    reportContext({
+      usage: {
+        currentSpendCents: 100,
+        applications: [{ name: "only-app", totalCents: 100 }],
+        addons: [],
+        resourceLines: [],
+        syncedAt: "2026-08-11T00:00:00Z",
+      },
+    }),
+  );
+  assert(!result.markdown.includes("Showing the top"));
+});

@@ -1,5 +1,5 @@
 import { assert, assertEquals, assertRejects } from "jsr:@std/assert@1";
-import { createModelTestContext } from "jsr:@systeminit/swamp-testing";
+import { createModelTestContext } from "jsr:@systeminit/swamp-testing@0.20260604.20";
 import { model } from "./data.ts";
 
 // --- Fetch mocking ---
@@ -80,6 +80,7 @@ function args(overrides: Record<string, unknown> = {}) {
     confirmBucketId: "",
     bucketName: "",
     bucketVisibility: "private",
+    bucketJurisdiction: "default",
     bucketKeyName: "",
     bucketKeyPermission: "read_write",
     bucketKeyId: "",
@@ -389,6 +390,187 @@ Deno.test("get_cache strips connection credentials", async () => {
   assert(!everything.includes("s3cret-cache-pass"));
 });
 
+Deno.test("delete_cache is gated on confirmation and the synced catalog", async () => {
+  const storedCaches = {
+    caches: [
+      { id: "c-1", name: "cache-c-1", engine: "laravel_valkey", status: "available" },
+      { id: "c-2", name: "cache-c-2", engine: "laravel_valkey", status: "available" },
+    ],
+    cacheCount: 2,
+    syncedAt: "2026-08-09T00:00:00Z",
+  };
+
+  const mismatch = createModelTestContext({
+    globalArgs: args({ cacheId: "c-1", confirmCacheId: "c-2" }),
+    storedResources: { caches: storedCaches },
+  });
+  await withMockedFetch([], async (calls) => {
+    await assertRejects(
+      () => model.methods.delete_cache.execute({}, mismatch.context),
+      Error,
+      "confirmCacheId does not match",
+    );
+    assertEquals(calls.length, 0);
+  });
+
+  const unknown = createModelTestContext({
+    globalArgs: args({ cacheId: "ghost", confirmCacheId: "ghost" }),
+    storedResources: { caches: storedCaches },
+  });
+  await withMockedFetch([], async (calls) => {
+    await assertRejects(
+      () => model.methods.delete_cache.execute({}, unknown.context),
+      Error,
+      "not in the synced catalog",
+    );
+    assertEquals(calls.length, 0);
+  });
+
+  const ok = createModelTestContext({
+    globalArgs: args({ cacheId: "c-1", confirmCacheId: "c-1" }),
+    storedResources: { caches: storedCaches },
+  });
+  await withMockedFetch([{ status: 204 }], async (calls) => {
+    await model.methods.delete_cache.execute({}, ok.context);
+    assertEquals(calls[0].method, "DELETE");
+    assert(calls[0].url.endsWith("/caches/c-1"));
+  });
+  assertEquals(ok.getWrittenResources()[0].data.cacheCount, 1);
+});
+
+// --- buckets ---
+
+Deno.test("create_bucket vaults the initial key the API mints alongside it", async () => {
+  const { context, getWrittenResources, getLogs } = createModelTestContext({
+    globalArgs: args({ bucketName: "assets", bucketKeyName: "assets-key" }),
+  });
+  await withMockedFetch(
+    [{
+      status: 201,
+      body: {
+        data: {
+          id: "b-1",
+          type: "buckets",
+          attributes: {
+            name: "assets",
+            status: "available",
+            visibility: "private",
+            jurisdiction: "default",
+            endpoint: "https://s3.example.laravel.cloud",
+            url: null,
+            created_at: "2026-08-09T00:00:00Z",
+          },
+        },
+        // The initial key is matched by the PRESENCE of key material, not by
+        // its JSON:API type string — the secret is shown only in this response.
+        included: [
+          { id: "other-1", type: "regions", attributes: { name: "us-east-2" } },
+          {
+            id: "key-1",
+            type: "filesystemKeys",
+            attributes: {
+              name: "assets-key",
+              permission: "read_write",
+              access_key_id: "AKIA-INITIAL-ID",
+              access_key_secret: "INITIAL-SECRET-S3-KEY",
+              created_at: "2026-08-09T00:00:00Z",
+            },
+          },
+        ],
+      },
+    }],
+    async (calls) => {
+      await model.methods.create_bucket.execute({}, context);
+      // live-verified contract: jurisdiction + key_name + key_permission
+      assertEquals(calls[0].body.name, "assets");
+      assertEquals(calls[0].body.jurisdiction, "default");
+      assertEquals(calls[0].body.key_name, "assets-key");
+      assertEquals(calls[0].body.key_permission, "read_write");
+    },
+  );
+
+  const written = getWrittenResources();
+  assertEquals(written.map((w) => w.specName), ["bucket", "bucketKey"]);
+  assertEquals(written[0].data.jurisdiction, "default");
+  assertEquals(written[1].data.id, "key-1");
+  assertEquals(written[1].data.bucketId, "b-1");
+  assertEquals(written[1].data.accessKeySecret, "INITIAL-SECRET-S3-KEY");
+  // the secret reaches the vault-backed resource, never the logs
+  assert(!JSON.stringify(getLogs()).includes("INITIAL-SECRET-S3-KEY"));
+  assert(!JSON.stringify(getLogs()).includes("AKIA-INITIAL-ID"));
+});
+
+Deno.test("create_bucket without a minted key writes the bucket alone", async () => {
+  const { context, getWrittenResources } = createModelTestContext({
+    globalArgs: args({ bucketName: "assets" }),
+  });
+  await withMockedFetch(
+    [{
+      status: 201,
+      body: {
+        data: {
+          id: "b-1",
+          type: "buckets",
+          attributes: { name: "assets", visibility: "private" },
+        },
+        included: [],
+      },
+    }],
+    async () => {
+      await model.methods.create_bucket.execute({}, context);
+    },
+  );
+  assertEquals(getWrittenResources().map((w) => w.specName), ["bucket"]);
+});
+
+Deno.test("delete_bucket is gated on confirmation and the synced catalog", async () => {
+  const storedBuckets = {
+    buckets: [
+      { id: "b-1", name: "assets", visibility: "private" },
+      { id: "b-2", name: "backups", visibility: "private" },
+    ],
+    bucketCount: 2,
+    syncedAt: "2026-08-09T00:00:00Z",
+  };
+
+  const mismatch = createModelTestContext({
+    globalArgs: args({ bucketId: "b-1", confirmBucketId: "b-2" }),
+    storedResources: { buckets: storedBuckets },
+  });
+  await withMockedFetch([], async (calls) => {
+    await assertRejects(
+      () => model.methods.delete_bucket.execute({}, mismatch.context),
+      Error,
+      "confirmBucketId does not match",
+    );
+    assertEquals(calls.length, 0);
+  });
+
+  const unknown = createModelTestContext({
+    globalArgs: args({ bucketId: "ghost", confirmBucketId: "ghost" }),
+    storedResources: { buckets: storedBuckets },
+  });
+  await withMockedFetch([], async (calls) => {
+    await assertRejects(
+      () => model.methods.delete_bucket.execute({}, unknown.context),
+      Error,
+      "not in the synced catalog",
+    );
+    assertEquals(calls.length, 0);
+  });
+
+  const ok = createModelTestContext({
+    globalArgs: args({ bucketId: "b-1", confirmBucketId: "b-1" }),
+    storedResources: { buckets: storedBuckets },
+  });
+  await withMockedFetch([{ status: 204 }], async (calls) => {
+    await model.methods.delete_bucket.execute({}, ok.context);
+    assertEquals(calls[0].method, "DELETE");
+    assert(calls[0].url.endsWith("/buckets/b-1"));
+  });
+  assertEquals(ok.getWrittenResources()[0].data.bucketCount, 1);
+});
+
 // --- bucket keys ---
 
 Deno.test("create_bucket_key stores the pair as sensitive fields, never logs them", async () => {
@@ -509,13 +691,23 @@ Deno.test("get_cluster_metrics summarizes series under the target id", async () 
   await withMockedFetch(
     [{
       status: 200,
+      // Captured verbatim from a live Neon cluster on 2026-08-12. The
+      // summary field is a SCALAR whose name varies per metric, and
+      // replica_lag is a bare array — the shape the earlier invented
+      // fixture got wrong, which is why this method shipped broken.
       body: {
         data: {
-          cpu_usage: {
-            labels: ["db"],
-            average: [5],
-            data: [{ x: "t", y: [5] }],
+          cpu_usage: { data: [], average: 0 },
+          compute_hours: {
+            data: [{ x: "2026-08-12T17:00:00.000000Z", y: 0.01 }],
+            total: 0.01,
           },
+          memory_usage: { data: [], current: 0, min: 0, max: 0 },
+          storage_usage: {
+            data: [{ x: "2026-08-12T17:00:00.000000Z", y: 39370752 }],
+            current: 39370752,
+          },
+          replica_lag: [],
         },
       },
     }],
@@ -526,6 +718,23 @@ Deno.test("get_cluster_metrics summarizes series under the target id", async () 
   const written = getWrittenResources();
   assertEquals(written[0].specName, "clusterMetrics");
   assertEquals(written[0].data.targetId, "db-1");
+
+  const series = written[0].data.series as Record<string, unknown>[];
+  const by = (n: string) => series.find((s) => s.name === n)!;
+  assertEquals(series.length, 5);
+  // a scalar `average` of 0 must survive, not crash and not vanish
+  assertEquals(by("cpu_usage").average, [0]);
+  assertEquals(by("cpu_usage").labels, []);
+  assertEquals(by("cpu_usage").pointCount, 0);
+  assertEquals(by("compute_hours").total, 0.01);
+  assertEquals(by("compute_hours").latest, 0.01);
+  assertEquals(by("memory_usage").current, 0);
+  assertEquals(by("memory_usage").max, 0);
+  assertEquals(by("storage_usage").latest, 39370752);
+  // a bare-array series summarizes to empties rather than throwing
+  assertEquals(by("replica_lag").pointCount, 0);
+  assertEquals(by("replica_lag").average, []);
+  assertEquals(by("replica_lag").total, null);
 });
 
 Deno.test("get_database resolves the schema ID from stored state", async () => {
@@ -580,9 +789,63 @@ Deno.test("list_database_types stores the engine catalog", async () => {
       await model.methods.list_database_types.execute({}, context);
     },
   );
-  // deno-lint-ignore no-explicit-any
-  assertEquals(
-    (getWrittenResources()[0].data.types as any)[0].type,
-    "laravel_mysql_84",
+  const types = getWrittenResources()[0].data.types as { type: string }[];
+  assertEquals(types[0].type, "laravel_mysql_84");
+});
+
+// --- Retry policy (lcApi is duplicated per model — pin it in each) ---
+
+Deno.test("data: 5xx retried for GET, never replayed for POST", async () => {
+  const { context } = createModelTestContext({ globalArgs: args() });
+  await withMockedFetch(
+    [
+      { status: 503, body: {}, headers: { "Retry-After": "0" } },
+      { status: 200, body: { data: [rawCluster("db-1")], links: {} } },
+    ],
+    async (calls) => {
+      await model.methods.sync_clusters.execute({}, context);
+      assertEquals(calls.length, 2);
+    },
   );
+
+  // A replayed POST could bill a second cluster.
+  const create = createModelTestContext({
+    globalArgs: args({ clusterName: "smoke-db" }),
+  });
+  await withMockedFetch(
+    [
+      { status: 502, body: {}, headers: { "Retry-After": "0" } },
+      { status: 201, body: { data: rawCluster("db-9") } },
+    ],
+    async (calls) => {
+      await assertRejects(
+        () => model.methods.create_cluster.execute({}, create.context),
+        Error,
+        "(502)",
+      );
+      assertEquals(calls.length, 1);
+    },
+  );
+});
+
+// --- Pagination page cap ---
+
+Deno.test("lcPaginate stops at the page cap and warns that it truncated", async () => {
+  const { context, getWrittenResources, getLogs } = createModelTestContext({
+    globalArgs: args(),
+  });
+  // Every page advertises another one, so the cap is what ends the walk.
+  const endless = Array.from({ length: 101 }, () => ({
+    status: 200,
+    body: {
+      data: [rawCluster("db-1")],
+      links: { next: "https://cloud.laravel.com/api/databases/clusters?page=2" },
+    },
+  }));
+  await withMockedFetch(endless, async (calls) => {
+    await model.methods.sync_clusters.execute({}, context);
+    assertEquals(calls.length, 100); // SYNC_MAX_PAGES, not 101
+  });
+  assertEquals(getWrittenResources()[0].data.clusterCount, 100);
+  assert(JSON.stringify(getLogs()).includes("page cap"));
 });

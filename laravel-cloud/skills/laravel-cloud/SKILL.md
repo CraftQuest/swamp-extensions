@@ -21,9 +21,15 @@ storage), and `lc-queues` (instances, managed queues, failed jobs,
 background processes).
 State lives in per-purpose resources — read with
 `swamp data get lc-apps <name>` (`apps`, `app`, `environment`,
-`deployment`, `deploymentLogs`, `commandRun`, `domains`) and
+`deployment`, `deploymentLogs`, `commandRun`, `domains`, `domain`,
+`deployments`, `commands`, `environmentLogs`, `environmentMetrics`,
+`organization`, `regions`, `usage`),
 `swamp data get lc-data <name>` (`clusters`, `cluster`, `databases`,
-`snapshots`, `caches`, `cache`, `buckets`, `bucket`, `bucketKeys`).
+`snapshots`, `snapshot`, `schema`, `caches`, `cache`, `cacheTypes`,
+`databaseTypes`, `buckets`, `bucket`, `bucketKeys`, `bucketKeyInfo`,
+`clusterMetrics`, `cacheMetrics`), and
+`swamp data get lc-queues <name>` (`instances`, `instance`,
+`instanceSizes`, `failedJobs`, `processes`, `process`).
 
 ## Pre-flight (before any method)
 
@@ -63,9 +69,12 @@ State lives in per-purpose resources — read with
   `env_variables` argument — never echo them back, never store them, and
   never read them out of the environment via run_command tricks
   (`php artisan tinker --execute='env(...)'`, `printenv`, `cat .env`).
-- `stop_environment` on a RUNNING environment requires
-  `confirm_environment_id` — surface the real ID, ask the user to confirm
-  it. Starting or stopping an already-stopped environment needs nothing.
+- `stop_environment` requires `confirm_environment_id` unless the
+  environment is ALREADY STOPPED — surface the real ID, ask the user to
+  confirm it. Statuses are `deploying`, `running`, `hibernating`,
+  `stopped`; a hibernating environment has merely scaled to zero and
+  still wakes on request, so stopping it is an outage. Only starting, or
+  stopping an already-stopped environment, needs nothing.
 
 ## run_command — the dangerous convenience
 
@@ -137,12 +146,36 @@ running.
   gate (confirm + stored list). Never infer the confirmation.
 - Failed jobs: `retry_failed_job` freely (jobs should be idempotent);
   `delete_failed_job` is gated — it destroys the evidence.
+- **`list_failed_jobs` returning 0 does not mean nothing failed.** Laravel
+  records failures in a `failed_jobs` TABLE, so an environment with no
+  database attached loses them silently — jobs fail into the void and the
+  queue looks healthy. Verified live: with `database.default` on sqlite and
+  no cluster, repeated failures produced an empty list; attaching a cluster,
+  redeploying and running `migrate` made the same job show up immediately.
+  If a user reports "jobs disappear", check `get_environment` for an
+  attached database before anything else.
+- A managed queue only picks up the platform queue connection on a deploy
+  that happens AFTER it exists. Create the queue, then redeploy, or jobs
+  keep going to the previous connection (`config("queue.default")` reads
+  `cloud` once it is wired).
 - Managed-queue platform rules: scaling_type "none", scale-to-zero (no
   min_replicas), max 3 replicas, creation needs background_processes
   (e.g. [{"type": "worker", "processes": 1}]), and workers have exactly
   one process — scale replicas, not processes.
 - Before create_instance, run `list_instance_sizes` (managed queues use
   the mq.* groups).
+- **Background processes are NOT the same as that creation array, and do
+  not work on managed queues** — the API answers "Background processes are
+  not available for managed queues". They attach to `app`, `service` or
+  `queue` instances (instance types are app|service|queue|managed_queue).
+  `create_background_process` requires `config.connection` AND
+  `config.queue`; the live-verified payload is
+  `{"type":"worker","processes":1,"command":"php artisan queue:work",
+  "config":{"connection":"sqs","queue":"default"}}`. Omitting config makes
+  the API reject with an HTML redirect, so the error surfaces as
+  "redirected (302) instead of returning JSON" — that means a malformed
+  payload, not an outage. Send the full definition to
+  `update_background_process` too, not just the changed field.
 
 ## Settings, history, and observability
 
