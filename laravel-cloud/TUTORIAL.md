@@ -1,9 +1,10 @@
 # Run Laravel Cloud by talking to your AI agent
 
 **The sample project:** deploy a Laravel app to Laravel Cloud, give it a
-managed queue with queue-safe deploys, snapshot the database before a
-migration, manage its env vars, check the bill, stop and restart the
-site, and tear it all down — **without typing a single API call**. You
+real database sized from the platform's own config catalog, a managed
+queue with queue-safe deploys, snapshot the database before a migration,
+manage its env vars, check the bill, stop and restart the site, and tear
+it all down — **without typing a single API call**. You
 talk; your agent drives `@craftquest/laravel-cloud`, a published,
 inspectable [swamp](https://github.com/swamp-club/swamp) extension whose
 safety gates hold no matter who's driving. About 15 minutes; costs cents;
@@ -62,7 +63,31 @@ surfaces it in the error. (Real example: deploy an app with a managed
 queue but without `aws/aws-sdk-php`, and the failure message names the
 exact composer command to run.)
 
-## 2. "Add a managed queue and redeploy the queue-safe way"
+## 2. "Give it a MySQL database and attach it"
+
+The agent doesn't guess at cluster settings — it can't. It runs
+`list_database_types` first, and the stored catalog carries each
+engine's **`configSchema`**: which config fields are required, the valid
+size enum, and the numeric bounds. For `laravel_mysql_84` that means
+five required fields — `size` (from `mysql-flex-512mb` up to
+`mysql-pro-32gb`), `storage` (5–1000 GB), `is_public`,
+`uses_scheduled_snapshots`, and `retention_days` (0–30) — so the agent
+proposes a concrete `clusterConfig` built from that schema, states that
+a database cluster bills real money, and asks before creating.
+
+Skip the discovery and the tool catches it: `create_cluster` refuses
+**before** any API call when required config fields are missing, and
+the refusal names each field with its valid values. No guessing sizes
+into 422s — the guard is in the tool, not the prompt.
+
+Then the agent creates a schema in the cluster and runs
+`attach_database` on the environment — do this before the first deploy
+where migrations matter. A successful attach shows up as
+`databaseSchemaId` in the environment state, and Laravel Cloud injects
+the connection credentials itself; they never pass through swamp, your
+agent, or this conversation.
+
+## 3. "Add a managed queue and redeploy the queue-safe way"
 
 The agent creates a scale-to-zero managed queue (it knows the platform's
 rules — sizing groups, worker limits — from the skill and the
@@ -78,7 +103,7 @@ if you ever need it back, `restore_database` builds a **new** cluster
 from that snapshot. It never overwrites the one you're running on, so
 "restore" can't itself become the outage.
 
-## 3. "Set APP_TIMEZONE to America/Chicago on production"
+## 4. "Set APP_TIMEZONE to America/Chicago on production"
 
 Done — and here's the part worth noticing: ask your agent *"what env
 vars does production have?"* and it answers with **key names only**.
@@ -86,14 +111,14 @@ Values never enter swamp's records, logs, or the conversation. The skill
 also forbids the agent from fishing values out via artisan tricks. Your
 secrets stay on the platform.
 
-## 4. "What's Laravel Cloud costing me?"
+## 5. "What's Laravel Cloud costing me?"
 
 The agent pulls the usage summary and shows you the bundled spend
 report: current spend, credit balance, alert headroom, per-app cost
 tables. For this tutorial the answer is: cents, probably covered
 entirely by the platform's starting credits.
 
-## 5. "Stop the environment for the night"
+## 6. "Stop the environment for the night"
 
 Cheaper than deleting, and it shows the gates working on something
 reversible. The agent checks the environment's real status first, and
@@ -111,7 +136,7 @@ rather than assumed safe.
 Say *"start it back up"* and it returns — no confirmation needed, because
 starting can't take anything down.
 
-## 6. "Delete the app" — and watch what the agent *can't* do
+## 7. "Delete the app" — and watch what the agent *can't* do
 
 Here's the trust story. The agent won't just do it: it reads the app's
 real ID from the synced records, shows it to you, and asks you to
@@ -121,7 +146,7 @@ the target exists in synced state. A guessed, inferred, or mistyped ID
 deletes nothing. The guardrails are in the tool, not in the prompt — the
 same gates hold for you, for CI, and for any agent.
 
-## 7. "Tear it all down so nothing is billing"
+## 8. "Tear it all down so nothing is billing"
 
 The agent deletes inner resources before outer ones (the platform
 enforces the order), then sweeps every catalog — apps, clusters, caches,
@@ -153,6 +178,14 @@ interface:
 ```bash
 swamp model method run lc-apps create_app \
   --input '{"app_name": "my-app", "repository": "acme/my-laravel-app"}'
+swamp model method run lc-data list_database_types   # configSchema lands in state
+swamp model method run lc-data create_cluster \
+  --input '{"cluster_name": "my-db", "database_type": "laravel_mysql_84",
+            "cluster_config": "{\"size\": \"mysql-flex-512mb\", \"storage\": 5, \"is_public\": false, \"uses_scheduled_snapshots\": true, \"retention_days\": 7}"}'
+swamp model method run lc-data create_database \
+  --input '{"cluster_id": "<cluster id>", "database_name": "my_app"}'
+swamp model method run lc-apps attach_database \
+  --input '{"environment_id": "<env id>", "database_schema_id": "<schema id from lc-data list_databases>"}'
 swamp workflow run "@craftquest/safe-deploy" \
   --input '{"environment_id": "<env id>", "queue_instance_id": "<queue id>"}'
 swamp model method run lc-apps get_usage
