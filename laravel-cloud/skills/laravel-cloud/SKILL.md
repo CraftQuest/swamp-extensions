@@ -145,6 +145,29 @@ running.
   creating clusters, caches, or apps, and state the resource class you're
   about to create.
 
+## Retrying a create that "failed"
+
+A create method that reports an error may already have succeeded — the API
+accepted it and the response was lost, or the failure came after the write.
+Creates are not idempotent, and Laravel Cloud enforces unique names, so a
+blind retry produces a 422 on the name rather than a second resource.
+
+- **Re-read state before retrying any create.** `get_app` (environments),
+  `sync_apps`, `sync_clusters`, `list_databases`, `sync_caches`,
+  `sync_buckets` — then compare against what you meant to create. Only
+  retry once you've confirmed it isn't there.
+- **Don't filter method output down to a pass/fail signal.** Read the
+  method's logs and the written resource; `--json` piped through a narrow
+  `jq` filter can hide the ID of a resource that was in fact created. If
+  you can't see what a method produced, `swamp data get` it rather than
+  guessing.
+- `create_environment` is retry-safe: it looks the name up first, and again
+  after a 422, and adopts the existing environment. Its log says whether
+  anything was created ("nothing was created" when it adopted one). Other
+  creates have no such guard — check first.
+- A 422 on a create is almost always "that name is taken", i.e. evidence
+  the resource exists. Treat it as a signal to go look, not to retry.
+
 ## Queues and instances
 
 - "The queue is stuck / runaway job": `pause_queue` FIRST (reversible,
@@ -212,6 +235,8 @@ running.
   are org-scoped: the token decides which organization you operate on.
 - Method failed? `swamp report get @swamp/method-summary --model lc-apps --json`
   (or `--model lc-data`) before retrying.
+  A method can fail *after* the remote change landed — confirm the resource
+  isn't already there before you retry (see "Retrying a create that 'failed'").
 - Stale bundle after editing source: remove `.swamp/bundles/apps.ts.js` /
   `.swamp/bundles/data.ts.js` and re-run.
 - `create_app` 4xx about the repository usually means the git integration

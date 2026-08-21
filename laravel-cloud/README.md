@@ -115,7 +115,7 @@ than one organization? Copy the instance again with a new `name`, a new `id`
 | `create_app`                                                         | Create an app from a connected repository                                             |
 | `delete_app`                                                         | Delete an app and everything in it — double-gated                                     |
 | `get_environment`                                                    | Fetch environment detail — env var **key names only**, never values                   |
-| `create_environment`                                                 | Create an environment tracking a branch                                               |
+| `create_environment`                                                 | Create an environment tracking a branch — retry-safe (adopts an existing same-name env) |
 | `delete_environment`                                                 | Double-gated (confirm + present in stored app detail)                                 |
 | `start_environment`                                                  | Start a stopped environment                                                           |
 | `stop_environment`                                                   | Gated **unless already stopped** — running, hibernating and deploying all need confirmation |

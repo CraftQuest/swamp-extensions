@@ -813,6 +813,33 @@ async function fetchAndWriteEnvironment(
   return { dataHandles: [handle] };
 }
 
+/**
+ * Look up an environment on an application by name, returning its ID.
+ *
+ * Environment names are unique per application, and the create POST is not
+ * idempotent: if a create call times out or is reported as failed after the
+ * API already accepted it, a naive retry hits the unique-name constraint
+ * with a 422 instead of converging. Creation uses this both before the POST
+ * and after a rejected one so a retry adopts the existing environment.
+ */
+async function findEnvironmentIdByName(
+  context: Context,
+  appId: string,
+  environmentName: string,
+): Promise<string | null> {
+  const { laravelCloudToken } = context.globalArgs;
+  const res = await lcApi(
+    laravelCloudToken,
+    "GET",
+    `/applications/${appId}?include=environments`,
+  );
+  const match = (res.included ?? []).find(
+    (i: Json) =>
+      i.type === "environments" && i.attributes?.name === environmentName,
+  );
+  return match?.id ?? null;
+}
+
 // --- Model ---
 
 /**
@@ -830,7 +857,7 @@ async function fetchAndWriteEnvironment(
 export const model = {
   type: "@craftquest/laravel-cloud/apps",
   reports: ["@craftquest/laravel-cloud-usage"],
-  version: "2026.08.21.1",
+  version: "2026.08.21.2",
   upgrades: [
     {
       toVersion: "2026.08.10.2",
@@ -883,6 +910,12 @@ export const model = {
       toVersion: "2026.08.21.1",
       description:
         "attach_database / detach_database: attaching a database schema to an environment no longer requires a hand-built update_environment payload. EnvironmentSchema gains an optional databaseSchemaId (from relationships.database.data.id); snapshots written earlier still read back",
+      upgradeAttributes: (old: Record<string, unknown>) => old,
+    },
+    {
+      toVersion: "2026.08.21.2",
+      description:
+        "create_environment is retry-safe: it looks the environment up by name before creating, and again after a 422, adopting an existing one instead of failing on the unique-name constraint — a create reported as failed may already have succeeded. Logs say plainly whether anything was created; no schema changes",
       upgradeAttributes: (old: Record<string, unknown>) => old,
     },
   ],
@@ -1179,7 +1212,9 @@ export const model = {
 
     create_environment: {
       description:
-        "Create an environment on an application (appId, branch, environmentName arguments)",
+        "Create an environment on an application (appId, branch, environmentName arguments). " +
+        "Retry-safe: if the app already has an environment with that name it is adopted and " +
+        "reported as pre-existing, rather than failing on the unique-name constraint.",
       arguments: z.object({}),
       execute: async (_args: unknown, context: Context) => {
         const { laravelCloudToken, appId, branch, environmentName } =
@@ -1188,13 +1223,50 @@ export const model = {
         requireArg(branch, "branch", "create_environment");
         requireArg(environmentName, "environmentName", "create_environment");
 
-        const res = await lcApi(
-          laravelCloudToken,
-          "POST",
-          `/applications/${appId}/environments`,
-          { branch, name: environmentName },
+        // A create that was reported as failed may already have succeeded —
+        // a timeout or a dropped response leaves a real environment behind.
+        // Check by name first so a retry converges instead of 422-ing on the
+        // unique-name constraint.
+        const alreadyThere = await findEnvironmentIdByName(
+          context,
+          appId,
+          environmentName,
         );
-        const data = requireData(res, "created environment");
+        if (alreadyThere) {
+          context.logger.warn(
+            "Environment {name} ({id}) already exists on app {appId} — adopted it, nothing was created. Branch '{branch}' was NOT applied: the environment resource does not expose its tracked branch, so confirm it if this was not a retry",
+            { name: environmentName, id: alreadyThere, appId, branch },
+          );
+          return await fetchAndWriteEnvironment(context, alreadyThere);
+        }
+
+        let data: Json;
+        try {
+          const res = await lcApi(
+            laravelCloudToken,
+            "POST",
+            `/applications/${appId}/environments`,
+            { branch, name: environmentName },
+          );
+          data = requireData(res, "created environment");
+        } catch (err) {
+          // 422 is how the unique-name constraint reports itself. Look again
+          // before giving up: the name may have been taken between the check
+          // above and the POST, including by this method's own earlier call.
+          if (!(err instanceof LcApiError) || err.status !== 422) throw err;
+          const raced = await findEnvironmentIdByName(
+            context,
+            appId,
+            environmentName,
+          );
+          if (!raced) throw err;
+          context.logger.warn(
+            "Create was rejected (422) because environment {name} ({id}) already exists on app {appId} — adopted it, nothing was created. Branch '{branch}' was NOT applied: the environment resource does not expose its tracked branch, so confirm it if this was not a retry",
+            { name: environmentName, id: raced, appId, branch },
+          );
+          return await fetchAndWriteEnvironment(context, raced);
+        }
+
         context.logger.info(
           "Created environment {name} ({id}) tracking branch {branch}",
           { name: environmentName, id: data.id, branch },

@@ -372,6 +372,128 @@ Deno.test("delete_environment is gated on confirmation and the stored app detail
   ]);
 });
 
+// --- create_environment: retry safety ---
+
+Deno.test("create_environment creates when the name is free", async () => {
+  const { context, getWrittenResources } = createModelTestContext({
+    globalArgs: args({
+      appId: "a-1",
+      branch: "main",
+      environmentName: "production",
+    }),
+  });
+  await withMockedFetch(
+    [
+      // lookup: app has an unrelated environment only
+      {
+        status: 200,
+        body: {
+          data: rawApp("a-1"),
+          included: [rawEnvironment("env-9", { name: "staging" })],
+        },
+      },
+      { status: 201, body: { data: rawEnvironment("env-1") } },
+    ],
+    async (calls) => {
+      await model.methods.create_environment.execute({}, context);
+      assertEquals(calls.length, 2);
+      assertEquals(calls[1].method, "POST");
+      assertEquals(calls[1].body, { branch: "main", name: "production" });
+    },
+  );
+  assertEquals(getWrittenResources()[0].data.id, "env-1");
+});
+
+Deno.test("create_environment adopts an existing same-name environment instead of POSTing", async () => {
+  const { context, getWrittenResources, getLogs } = createModelTestContext({
+    globalArgs: args({
+      appId: "a-1",
+      branch: "main",
+      environmentName: "production",
+    }),
+  });
+  await withMockedFetch(
+    [
+      {
+        status: 200,
+        body: {
+          data: rawApp("a-1"),
+          included: [rawEnvironment("env-1")],
+        },
+      },
+      { status: 200, body: { data: rawEnvironment("env-1") } },
+    ],
+    async (calls) => {
+      await model.methods.create_environment.execute({}, context);
+      // lookup + detail fetch, and never a POST
+      assertEquals(calls.map((c) => c.method), ["GET", "GET"]);
+    },
+  );
+  assertEquals(getWrittenResources()[0].data.id, "env-1");
+  assert(JSON.stringify(getLogs()).includes("nothing was created"));
+});
+
+Deno.test("create_environment adopts the environment behind a 422 unique-name rejection", async () => {
+  const { context, getWrittenResources, getLogs } = createModelTestContext({
+    globalArgs: args({
+      appId: "a-1",
+      branch: "main",
+      environmentName: "production",
+    }),
+  });
+  await withMockedFetch(
+    [
+      // first lookup: name still free (the earlier create had not landed yet)
+      { status: 200, body: { data: rawApp("a-1"), included: [] } },
+      {
+        status: 422,
+        body: { errors: [{ detail: "name has already been taken" }] },
+      },
+      // second lookup: it is there now
+      {
+        status: 200,
+        body: { data: rawApp("a-1"), included: [rawEnvironment("env-1")] },
+      },
+      { status: 200, body: { data: rawEnvironment("env-1") } },
+    ],
+    async (calls) => {
+      await model.methods.create_environment.execute({}, context);
+      assertEquals(calls.map((c) => c.method), [
+        "GET",
+        "POST",
+        "GET",
+        "GET",
+      ]);
+    },
+  );
+  assertEquals(getWrittenResources()[0].data.id, "env-1");
+  assert(JSON.stringify(getLogs()).includes("nothing was created"));
+});
+
+Deno.test("create_environment still fails on a 422 that is not a name collision", async () => {
+  const { context } = createModelTestContext({
+    globalArgs: args({
+      appId: "a-1",
+      branch: "nope",
+      environmentName: "production",
+    }),
+  });
+  await withMockedFetch(
+    [
+      { status: 200, body: { data: rawApp("a-1"), included: [] } },
+      { status: 422, body: { errors: [{ detail: "branch does not exist" }] } },
+      { status: 200, body: { data: rawApp("a-1"), included: [] } },
+    ],
+    async () => {
+      await assertRejects(
+        () => model.methods.create_environment.execute({}, context),
+        Error,
+        "422",
+      );
+    },
+  );
+});
+
 // --- get_environment: THE env var stripping test ---
 
 Deno.test("get_environment stores env var KEY NAMES only — values never in state or logs", async () => {
