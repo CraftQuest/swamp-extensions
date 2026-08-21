@@ -770,7 +770,7 @@ Deno.test("get_database resolves the schema ID from stored state", async () => {
   assertEquals(getWrittenResources()[0].specName, "schema");
 });
 
-Deno.test("list_database_types stores the engine catalog", async () => {
+Deno.test("list_database_types keeps each engine's config_schema", async () => {
   const { context, getWrittenResources } = createModelTestContext({
     globalArgs: args(),
   });
@@ -782,6 +782,23 @@ Deno.test("list_database_types stores the engine catalog", async () => {
           type: "laravel_mysql_84",
           label: "MySQL 8.4",
           regions: ["us-east-2"],
+          config_schema: [
+            {
+              name: "size",
+              type: "string",
+              required: true,
+              description: "Instance size",
+              enum: ["mysql-flex-512mb", "mysql-flex-1gb"],
+            },
+            {
+              name: "storage",
+              type: "integer",
+              required: true,
+              description: "Storage in GB",
+              min: 5,
+              max: 1000,
+            },
+          ],
         }],
       },
     }],
@@ -789,8 +806,73 @@ Deno.test("list_database_types stores the engine catalog", async () => {
       await model.methods.list_database_types.execute({}, context);
     },
   );
-  const types = getWrittenResources()[0].data.types as { type: string }[];
+  const types = getWrittenResources()[0].data.types as {
+    type: string;
+    configSchema: { name: string; enum?: string[] }[];
+  }[];
   assertEquals(types[0].type, "laravel_mysql_84");
+  // The config fields are what create_cluster payloads are built from —
+  // dropping them left agents guessing sizes into 422s.
+  assertEquals(types[0].configSchema.map((f) => f.name), ["size", "storage"]);
+  assertEquals(types[0].configSchema[0].enum![0], "mysql-flex-512mb");
+});
+
+Deno.test("create_cluster fails before the POST when required config is missing", async () => {
+  const storedTypes = {
+    types: [{
+      type: "laravel_mysql_84",
+      regions: ["us-east-2"],
+      configSchema: [
+        {
+          name: "size",
+          type: "string",
+          required: true,
+          enum: ["mysql-flex-512mb"],
+        },
+        { name: "storage", type: "integer", required: true, min: 5, max: 1000 },
+        { name: "maintenance_window", type: "string", required: false },
+      ],
+    }],
+    syncedAt: "2026-08-21T00:00:00Z",
+  };
+
+  // Missing entirely → actionable refusal, no API call.
+  const missing = createModelTestContext({
+    globalArgs: args({
+      clusterName: "smoke-db",
+      databaseType: "laravel_mysql_84",
+    }),
+    storedResources: { databaseTypes: storedTypes },
+  });
+  await withMockedFetch([], async (calls) => {
+    await assertRejects(
+      () => model.methods.create_cluster.execute({}, missing.context),
+      Error,
+      "requires clusterConfig",
+    );
+    assertEquals(calls.length, 0);
+  });
+
+  // All required fields present → the POST goes out (optional ones may be
+  // omitted).
+  const complete = createModelTestContext({
+    globalArgs: args({
+      clusterName: "smoke-db",
+      databaseType: "laravel_mysql_84",
+      clusterConfig: '{"size": "mysql-flex-512mb", "storage": 10}',
+    }),
+    storedResources: { databaseTypes: storedTypes },
+  });
+  await withMockedFetch(
+    [{ status: 201, body: { data: rawCluster("db-9") } }],
+    async (calls) => {
+      await model.methods.create_cluster.execute({}, complete.context);
+      assertEquals(calls[0].body.config, {
+        size: "mysql-flex-512mb",
+        storage: 10,
+      });
+    },
+  );
 });
 
 // --- Retry policy (lcApi is duplicated per model — pin it in each) ---

@@ -118,6 +118,13 @@ Protocol:
   pick. After a restore, run `sync_clusters` and tell the user to verify
   the new cluster in the Cloud UI (a platform issue can list it under
   its source's ID, making it unmanageable via API).
+- Creating a cluster: most engines REQUIRE `cluster_config` (MySQL needs
+  size/storage/is_public/uses_scheduled_snapshots/retention_days; Neon
+  needs cu_min/cu_max). Run `list_database_types` first and build the
+  config from that engine's `configSchema` in the `databaseTypes` state —
+  required flags, valid size enums, and min/max bounds are all there.
+  Never guess a size; create_cluster refuses up front when required
+  fields are missing and names them.
 - Cache sizes are engine-specific: run `list_cache_types` before
   `create_cache` and pick a size valid for the engine.
 - Deletion ordering the platform enforces: bucket keys before buckets,

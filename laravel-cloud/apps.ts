@@ -795,10 +795,13 @@ async function fetchAndWriteEnvironment(
   environmentId: string,
 ): Promise<{ dataHandles: Json[] }> {
   const { laravelCloudToken } = context.globalArgs;
+  // ?include=database is required for the database relationship linkage to be
+  // serialized at all — without it the API omits relationships.database and
+  // an attached schema reads back as databaseSchemaId: null.
   const res = await lcApi(
     laravelCloudToken,
     "GET",
-    `/environments/${environmentId}`,
+    `/environments/${environmentId}?include=database`,
   );
   const data = requireData(res, `environment ${environmentId}`);
   context.logger.info("Fetched environment {id} (status: {status})", {
@@ -857,7 +860,7 @@ async function findEnvironmentIdByName(
 export const model = {
   type: "@craftquest/laravel-cloud/apps",
   reports: ["@craftquest/laravel-cloud-usage"],
-  version: "2026.08.21.2",
+  version: "2026.08.21.3",
   upgrades: [
     {
       toVersion: "2026.08.10.2",
@@ -916,6 +919,12 @@ export const model = {
       toVersion: "2026.08.21.2",
       description:
         "create_environment is retry-safe: it looks the environment up by name before creating, and again after a 422, adopting an existing one instead of failing on the unique-name constraint — a create reported as failed may already have succeeded. Logs say plainly whether anything was created; no schema changes",
+      upgradeAttributes: (old: Record<string, unknown>) => old,
+    },
+    {
+      toVersion: "2026.08.21.3",
+      description:
+        "Environment fetches pass ?include=database — without it the API omits the database relationship linkage entirely, so an attached schema read back as databaseSchemaId: null. No schema changes",
       upgradeAttributes: (old: Record<string, unknown>) => old,
     },
   ],

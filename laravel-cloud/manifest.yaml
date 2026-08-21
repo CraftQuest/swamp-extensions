@@ -1,6 +1,6 @@
 manifestVersion: 1
 name: "@craftquest/laravel-cloud"
-version: "2026.08.21.2"
+version: "2026.08.21.3"
 repository: "https://github.com/CraftQuest/swamp-extensions"
 description: "Operate Laravel Cloud from swamp — applications, environments and env vars (values never stored), deploys followed to completion, artisan commands, domains, database clusters with snapshots and restores, caches, object storage, and managed queues. Ships deploy and queue-safe-deploy workflows, a spend report, and an agent skill. Every destructive operation is confirmation-gated. Pure HTTPS, token from your vault."
 paths:

@@ -474,7 +474,7 @@ async function fetchAndWriteInstance(
  */
 export const model = {
   type: "@craftquest/laravel-cloud/queues",
-  version: "2026.08.21.2",
+  version: "2026.08.21.3",
   upgrades: [
     {
       toVersion: "2026.08.10.3",
@@ -527,6 +527,12 @@ export const model = {
       toVersion: "2026.08.21.2",
       description:
         "Version bump alongside apps' retry-safe create_environment; no schema changes",
+      upgradeAttributes: (old: Record<string, unknown>) => old,
+    },
+    {
+      toVersion: "2026.08.21.3",
+      description:
+        "Version bump alongside apps' ?include=database environment fix and data's config_schema surfacing; no schema changes",
       upgradeAttributes: (old: Record<string, unknown>) => old,
     },
   ],

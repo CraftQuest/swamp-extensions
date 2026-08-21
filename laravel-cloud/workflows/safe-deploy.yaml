@@ -27,6 +27,10 @@ inputs:
       type: string
       default: ""
       description: Safety gate for delete_environment / stop_environment (unless already stopped)
+    database_schema_id:
+      type: string
+      default: ""
+      description: Database schema ID for attach_database
     deployment_id:
       type: string
       default: ""
@@ -156,14 +160,58 @@ jobs:
           type: model_method
           modelIdOrName: lc-queues
           methodName: pause_queue
+          # Full pass-through: the instance's globalArguments reference every
+          # instance input, and workflow validation requires each step to
+          # supply all of them. Values not used by this method are the
+          # instance defaults, so behavior is unchanged.
           inputs:
+            environment_id: ${{ inputs.environment_id }}
             instance_id: ${{ inputs.queue_instance_id }}
+            confirm_instance_id: ${{ inputs.confirm_instance_id }}
+            job_id: ${{ inputs.job_id }}
+            confirm_job_id: ${{ inputs.confirm_job_id }}
+            process_id: ${{ inputs.process_id }}
+            confirm_process_id: ${{ inputs.confirm_process_id }}
+            create_payload: ${{ inputs.create_payload }}
+            update_payload: ${{ inputs.update_payload }}
       - name: initiate
         description: Initiate deployment of the environment's tracked branch
         task:
           type: model_method
           modelIdOrName: lc-apps
           methodName: deploy
+          # Full pass-through: the instance's globalArguments reference every
+          # instance input, and workflow validation requires each step to
+          # supply all of them. Values not used by this method are the
+          # instance defaults, so behavior is unchanged.
+          inputs:
+            app_id: ${{ inputs.app_id }}
+            confirm_app_id: ${{ inputs.confirm_app_id }}
+            environment_id: ${{ inputs.environment_id }}
+            confirm_environment_id: ${{ inputs.confirm_environment_id }}
+            database_schema_id: ${{ inputs.database_schema_id }}
+            deployment_id: ${{ inputs.deployment_id }}
+            app_name: ${{ inputs.app_name }}
+            repository: ${{ inputs.repository }}
+            source_control_provider: ${{ inputs.source_control_provider }}
+            region: ${{ inputs.region }}
+            root_directory: ${{ inputs.root_directory }}
+            branch: ${{ inputs.branch }}
+            environment_name: ${{ inputs.environment_name }}
+            command: ${{ inputs.command }}
+            env_variables: ${{ inputs.env_variables }}
+            env_var_method: ${{ inputs.env_var_method }}
+            env_var_keys: ${{ inputs.env_var_keys }}
+            domain_name: ${{ inputs.domain_name }}
+            domain_id: ${{ inputs.domain_id }}
+            confirm_domain_id: ${{ inputs.confirm_domain_id }}
+            update_payload: ${{ inputs.update_payload }}
+            avatar_path: ${{ inputs.avatar_path }}
+            log_query: ${{ inputs.log_query }}
+            log_type: ${{ inputs.log_type }}
+            metrics_period: ${{ inputs.metrics_period }}
+            log_from: ${{ inputs.log_from }}
+            log_to: ${{ inputs.log_to }}
         dependsOn:
           - step: pause-queue
             condition:
@@ -174,6 +222,38 @@ jobs:
           type: model_method
           modelIdOrName: lc-apps
           methodName: wait_deployment
+          # Full pass-through: the instance's globalArguments reference every
+          # instance input, and workflow validation requires each step to
+          # supply all of them. Values not used by this method are the
+          # instance defaults, so behavior is unchanged.
+          inputs:
+            app_id: ${{ inputs.app_id }}
+            confirm_app_id: ${{ inputs.confirm_app_id }}
+            environment_id: ${{ inputs.environment_id }}
+            confirm_environment_id: ${{ inputs.confirm_environment_id }}
+            database_schema_id: ${{ inputs.database_schema_id }}
+            deployment_id: ${{ inputs.deployment_id }}
+            app_name: ${{ inputs.app_name }}
+            repository: ${{ inputs.repository }}
+            source_control_provider: ${{ inputs.source_control_provider }}
+            region: ${{ inputs.region }}
+            root_directory: ${{ inputs.root_directory }}
+            branch: ${{ inputs.branch }}
+            environment_name: ${{ inputs.environment_name }}
+            command: ${{ inputs.command }}
+            env_variables: ${{ inputs.env_variables }}
+            env_var_method: ${{ inputs.env_var_method }}
+            env_var_keys: ${{ inputs.env_var_keys }}
+            domain_name: ${{ inputs.domain_name }}
+            domain_id: ${{ inputs.domain_id }}
+            confirm_domain_id: ${{ inputs.confirm_domain_id }}
+            update_payload: ${{ inputs.update_payload }}
+            avatar_path: ${{ inputs.avatar_path }}
+            log_query: ${{ inputs.log_query }}
+            log_type: ${{ inputs.log_type }}
+            metrics_period: ${{ inputs.metrics_period }}
+            log_from: ${{ inputs.log_from }}
+            log_to: ${{ inputs.log_to }}
         dependsOn:
           - step: initiate
             condition:
@@ -184,8 +264,38 @@ jobs:
           type: model_method
           modelIdOrName: lc-apps
           methodName: run_command
+          # Full pass-through: the instance's globalArguments reference every
+          # instance input, and workflow validation requires each step to
+          # supply all of them. Values not used by this method are the
+          # instance defaults, so behavior is unchanged.
           inputs:
+            app_id: ${{ inputs.app_id }}
+            confirm_app_id: ${{ inputs.confirm_app_id }}
+            environment_id: ${{ inputs.environment_id }}
+            confirm_environment_id: ${{ inputs.confirm_environment_id }}
+            database_schema_id: ${{ inputs.database_schema_id }}
+            deployment_id: ${{ inputs.deployment_id }}
+            app_name: ${{ inputs.app_name }}
+            repository: ${{ inputs.repository }}
+            source_control_provider: ${{ inputs.source_control_provider }}
+            region: ${{ inputs.region }}
+            root_directory: ${{ inputs.root_directory }}
+            branch: ${{ inputs.branch }}
+            environment_name: ${{ inputs.environment_name }}
             command: ${{ inputs.migrate_command }}
+            env_variables: ${{ inputs.env_variables }}
+            env_var_method: ${{ inputs.env_var_method }}
+            env_var_keys: ${{ inputs.env_var_keys }}
+            domain_name: ${{ inputs.domain_name }}
+            domain_id: ${{ inputs.domain_id }}
+            confirm_domain_id: ${{ inputs.confirm_domain_id }}
+            update_payload: ${{ inputs.update_payload }}
+            avatar_path: ${{ inputs.avatar_path }}
+            log_query: ${{ inputs.log_query }}
+            log_type: ${{ inputs.log_type }}
+            metrics_period: ${{ inputs.metrics_period }}
+            log_from: ${{ inputs.log_from }}
+            log_to: ${{ inputs.log_to }}
         dependsOn:
           - step: wait
             condition:
@@ -196,8 +306,20 @@ jobs:
           type: model_method
           modelIdOrName: lc-queues
           methodName: resume_queue
+          # Full pass-through: the instance's globalArguments reference every
+          # instance input, and workflow validation requires each step to
+          # supply all of them. Values not used by this method are the
+          # instance defaults, so behavior is unchanged.
           inputs:
+            environment_id: ${{ inputs.environment_id }}
             instance_id: ${{ inputs.queue_instance_id }}
+            confirm_instance_id: ${{ inputs.confirm_instance_id }}
+            job_id: ${{ inputs.job_id }}
+            confirm_job_id: ${{ inputs.confirm_job_id }}
+            process_id: ${{ inputs.process_id }}
+            confirm_process_id: ${{ inputs.confirm_process_id }}
+            create_payload: ${{ inputs.create_payload }}
+            update_payload: ${{ inputs.update_payload }}
         dependsOn:
           - step: migrate
             condition:
@@ -215,5 +337,17 @@ jobs:
           type: model_method
           modelIdOrName: lc-queues
           methodName: resume_queue
+          # Full pass-through: the instance's globalArguments reference every
+          # instance input, and workflow validation requires each step to
+          # supply all of them. Values not used by this method are the
+          # instance defaults, so behavior is unchanged.
           inputs:
+            environment_id: ${{ inputs.environment_id }}
             instance_id: ${{ inputs.queue_instance_id }}
+            confirm_instance_id: ${{ inputs.confirm_instance_id }}
+            job_id: ${{ inputs.job_id }}
+            confirm_job_id: ${{ inputs.confirm_job_id }}
+            process_id: ${{ inputs.process_id }}
+            confirm_process_id: ${{ inputs.confirm_process_id }}
+            create_payload: ${{ inputs.create_payload }}
+            update_payload: ${{ inputs.update_payload }}

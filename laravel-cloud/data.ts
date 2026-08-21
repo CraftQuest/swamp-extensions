@@ -317,12 +317,32 @@ const DataMetricsSchema = z.object({
   syncedAt: z.string(),
 });
 
+const ClusterConfigFieldSchema = z
+  .object({
+    name: z.string(),
+    type: z.string().optional(),
+    required: z.boolean().optional(),
+    description: z.string().optional(),
+    enum: z.array(z.union([z.string(), z.number()])).optional(),
+    min: z.number().optional(),
+    max: z.number().optional(),
+    nullable: z.boolean().optional(),
+    example: z.string().optional(),
+  })
+  .catchall(z.unknown());
+
 const DatabaseTypesSchema = z.object({
   types: z.array(
     z.object({
       type: z.string(),
       label: z.string().optional(),
       regions: z.array(z.string()),
+      configSchema: z
+        .array(ClusterConfigFieldSchema)
+        .optional()
+        .describe(
+          "Engine-specific config fields for create_cluster's clusterConfig — required flags, enum sizes, and min/max bounds come from here",
+        ),
     }),
   ),
   syncedAt: z.string(),
@@ -733,7 +753,7 @@ function requireConfirm(
  */
 export const model = {
   type: "@craftquest/laravel-cloud/data",
-  version: "2026.08.21.2",
+  version: "2026.08.21.3",
   upgrades: [
     {
       toVersion: "2026.08.10.2",
@@ -792,6 +812,12 @@ export const model = {
       toVersion: "2026.08.21.2",
       description:
         "Version bump alongside apps' retry-safe create_environment; no schema changes",
+      upgradeAttributes: (old: Record<string, unknown>) => old,
+    },
+    {
+      toVersion: "2026.08.21.3",
+      description:
+        "list_database_types keeps each engine's config_schema (as configSchema) — previously dropped, leaving create_cluster unable to build a valid config payload — and create_cluster fails actionably before the POST when required config fields are missing. databaseTypes artifacts written earlier read back (configSchema is optional)",
       upgradeAttributes: (old: Record<string, unknown>) => old,
     },
   ],
@@ -999,7 +1025,7 @@ export const model = {
 
     create_cluster: {
       description:
-        "Create a database cluster (clusterName/databaseType/region arguments; clusterConfig for engine-specific settings)",
+        "Create a database cluster (clusterName/databaseType/region arguments). Most engines REQUIRE clusterConfig (e.g. MySQL needs size/storage/is_public/…) — run list_database_types first and build clusterConfig from the engine's configSchema",
       arguments: z.object({}),
       execute: async (_args: unknown, context: Context) => {
         const {
@@ -1020,6 +1046,36 @@ export const model = {
               "create_cluster: 'clusterConfig' must be a JSON object (parse failed).",
             );
           }
+        }
+        // Engines advertise their required config in /databases/types. When
+        // the engine catalog has been synced, fail actionably before the POST
+        // instead of letting the API 422 on a missing size/storage field.
+        const engineCatalog = (await context.readResource!(
+          "databaseTypes",
+        )) as z.infer<typeof DatabaseTypesSchema> | null;
+        const engine = engineCatalog?.types?.find(
+          (t) => t.type === databaseType,
+        );
+        const missing = (engine?.configSchema ?? []).filter(
+          (f) =>
+            f.required &&
+            (config === undefined || (config as Json)[f.name] === undefined),
+        );
+        if (missing.length > 0) {
+          const hints = missing.map((f) => {
+            if (f.enum) return `${f.name} (one of: ${f.enum.join(", ")})`;
+            if (f.min !== undefined || f.max !== undefined) {
+              return `${f.name} (${f.type ?? "number"}, ${f.min ?? "?"}–${
+                f.max ?? "?"
+              })`;
+            }
+            return `${f.name} (${f.type ?? "value"})`;
+          });
+          throw new Error(
+            `create_cluster: engine ${databaseType} requires clusterConfig field(s) ` +
+              `${hints.join(", ")}. Build clusterConfig from this engine's ` +
+              "configSchema in the databaseTypes state (list_database_types).",
+          );
         }
         const res = await lcApi(
           laravelCloudToken,
@@ -2140,7 +2196,7 @@ export const model = {
 
     list_database_types: {
       description:
-        "List available database engines with their regions — run before create_cluster",
+        "List available database engines with their regions and per-engine configSchema (required config fields, size enums, storage bounds) — run before create_cluster and build clusterConfig from configSchema",
       arguments: z.object({}),
       execute: async (_args: unknown, context: Context) => {
         const { laravelCloudToken } = context.globalArgs;
@@ -2149,6 +2205,7 @@ export const model = {
           type: t.type ?? "",
           label: t.label ?? undefined,
           regions: t.regions ?? [],
+          configSchema: t.config_schema ?? [],
         }));
         context.logger.info("{count} database engine(s) available", {
           count: types.length,

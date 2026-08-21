@@ -502,8 +502,11 @@ Deno.test("get_environment stores env var KEY NAMES only — values never in sta
   });
   await withMockedFetch(
     [{ status: 200, body: { data: rawEnvironment("env-1") } }],
-    async () => {
+    async (calls) => {
       await model.methods.get_environment.execute({}, context);
+      // Without ?include=database the API omits the database relationship
+      // linkage entirely and an attached schema reads back as null.
+      assert(calls[0].url.includes("include=database"));
     },
   );
   const written = getWrittenResources();
@@ -547,6 +550,7 @@ Deno.test("attach_database PATCHes database_schema_id and records it in state", 
       assertEquals(calls[0].method, "PATCH");
       assert(calls[0].url.endsWith("/environments/env-1"));
       assertEquals(calls[0].body, { database_schema_id: "schema-1" });
+      assert(calls[1].url.includes("include=database"));
     },
   );
   const written = getWrittenResources();
