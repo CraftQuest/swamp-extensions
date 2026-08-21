@@ -1,0 +1,20 @@
+# This repo is a mirror: extension source is authored in swamp-tools and
+# copied here by scripts/mirror-extension.sh. Nothing local should be
+# committed, and the copy is a plain recursive one — so anything a tool
+# happens to leave in an extension directory can ride along.
+
+# Local swamp state. Running a swamp command with an extension directory as
+# cwd makes swamp treat it as a repo root and write .swamp/ there; the audit
+# log holds absolute paths, session IDs, and shell history.
+.swamp/
+.swamp-sources.yaml
+
+# Local editor/agent configuration
+.claude/settings.local.json
+.claude/worktrees/
+.vscode/
+.idea/
+
+# OS noise
+.DS_Store
+Thumbs.db
