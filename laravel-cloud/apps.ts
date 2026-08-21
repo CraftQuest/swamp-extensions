@@ -34,6 +34,12 @@ const GlobalArgsSchema = z.object({
     .describe(
       "Target deployment ID (wait/logs; empty = the stored deployment)",
     ),
+  databaseSchemaId: z
+    .string()
+    .default("")
+    .describe(
+      "Database schema ID to attach to the environment (attach_database; get it from lc-data's list_databases)",
+    ),
   appName: z
     .string()
     .default("")
@@ -180,6 +186,11 @@ const EnvironmentSchema = z.object({
   deployCommand: z.string().nullable().optional(),
   usesOctane: z.boolean().optional(),
   usesHibernation: z.boolean().optional(),
+  databaseSchemaId: z
+    .string()
+    .nullable()
+    .optional()
+    .describe("Attached database schema ID, or null when none is attached"),
   envVarKeys: z
     .array(z.string())
     .describe("Environment variable KEY NAMES only — values are never stored"),
@@ -609,6 +620,7 @@ function toEnvironmentDetail(raw: Json): z.infer<typeof EnvironmentSchema> {
     deployCommand: a.deploy_command ?? null,
     usesOctane: a.uses_octane ?? undefined,
     usesHibernation: a.uses_hibernation ?? undefined,
+    databaseSchemaId: raw.relationships?.database?.data?.id ?? null,
     envVarKeys: envVars.map((v: Json) => v.key).filter(Boolean),
     updatedAt: new Date().toISOString(),
   };
@@ -818,7 +830,7 @@ async function fetchAndWriteEnvironment(
 export const model = {
   type: "@craftquest/laravel-cloud/apps",
   reports: ["@craftquest/laravel-cloud-usage"],
-  version: "2026.08.12.2",
+  version: "2026.08.21.1",
   upgrades: [
     {
       toVersion: "2026.08.10.2",
@@ -865,6 +877,12 @@ export const model = {
       toVersion: "2026.08.12.2",
       description:
         "Non-JSON and redirect responses now surface as explicit rejections instead of a JSON parse error; live coverage round documented; no schema changes",
+      upgradeAttributes: (old: Record<string, unknown>) => old,
+    },
+    {
+      toVersion: "2026.08.21.1",
+      description:
+        "attach_database / detach_database: attaching a database schema to an environment no longer requires a hand-built update_environment payload. EnvironmentSchema gains an optional databaseSchemaId (from relationships.database.data.id); snapshots written earlier still read back",
       upgradeAttributes: (old: Record<string, unknown>) => old,
     },
   ],
@@ -1842,6 +1860,67 @@ export const model = {
         context.logger.info("Updated environment {id}: {fields}", {
           id: environmentId,
           fields: Object.keys(payload).join(", "),
+        });
+        return await fetchAndWriteEnvironment(context, environmentId);
+      },
+    },
+
+    attach_database: {
+      description:
+        "Attach a database schema to an environment (environmentId + databaseSchemaId arguments). Run lc-data's list_databases first — the schema ID comes from there.",
+      arguments: z.object({}),
+      execute: async (_args: unknown, context: Context) => {
+        const { laravelCloudToken } = context.globalArgs;
+        const environmentId = requireArg(
+          context.globalArgs.environmentId,
+          "environmentId",
+          "attach_database",
+        );
+        const databaseSchemaId = requireArg(
+          context.globalArgs.databaseSchemaId,
+          "databaseSchemaId",
+          "attach_database",
+        );
+        await lcApi(
+          laravelCloudToken,
+          "PATCH",
+          `/environments/${environmentId}`,
+          { database_schema_id: databaseSchemaId },
+        );
+        context.logger.info(
+          "Attached database schema {schema} to environment {id}",
+          { schema: databaseSchemaId, id: environmentId },
+        );
+        return await fetchAndWriteEnvironment(context, environmentId);
+      },
+    },
+
+    detach_database: {
+      description:
+        "Detach the environment's database schema (environmentId argument). Gated: confirmEnvironmentId must match — a live app loses its database.",
+      arguments: z.object({}),
+      execute: async (_args: unknown, context: Context) => {
+        const { laravelCloudToken, confirmEnvironmentId } = context.globalArgs;
+        const environmentId = requireArg(
+          context.globalArgs.environmentId,
+          "environmentId",
+          "detach_database",
+        );
+        if (confirmEnvironmentId !== environmentId) {
+          throw new Error(
+            `Detach refused: environment ${environmentId} would lose its database — ` +
+              "queries, sessions and queued jobs break immediately. " +
+              "Re-state the exact environment ID in confirmEnvironmentId to confirm.",
+          );
+        }
+        await lcApi(
+          laravelCloudToken,
+          "PATCH",
+          `/environments/${environmentId}`,
+          { database_schema_id: null },
+        );
+        context.logger.info("Detached database schema from environment {id}", {
+          id: environmentId,
         });
         return await fetchAndWriteEnvironment(context, environmentId);
       },

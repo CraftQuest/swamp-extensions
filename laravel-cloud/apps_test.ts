@@ -71,6 +71,7 @@ function args(overrides: Record<string, unknown> = {}) {
     environmentId: "",
     confirmEnvironmentId: "",
     deploymentId: "",
+    databaseSchemaId: "",
     appName: "",
     repository: "",
     sourceControlProvider: "github",
@@ -317,7 +318,12 @@ Deno.test("delete_environment is gated on confirmation and the stored app detail
     slug: "demo-app",
     region: "us-east-2",
     environments: [
-      { id: "env-1", name: "production", slug: "production", status: "running" },
+      {
+        id: "env-1",
+        name: "production",
+        slug: "production",
+        status: "running",
+      },
       { id: "env-2", name: "staging", slug: "staging", status: "stopped" },
     ],
     updatedAt: "2026-08-09T00:00:00Z",
@@ -385,6 +391,106 @@ Deno.test("get_environment stores env var KEY NAMES only — values never in sta
     JSON.stringify(getLogs());
   assert(!everything.includes("VERYSECRETVALUE"));
   assert(!everything.includes("s3cret-db-pass"));
+});
+
+// --- attach_database / detach_database ---
+
+/** An environment resource carrying the database relationship. */
+function rawEnvironmentWithDatabase(id: string, schemaId: string | null) {
+  return {
+    ...rawEnvironment(id),
+    relationships: {
+      database: { data: schemaId ? { type: "databases", id: schemaId } : null },
+    },
+  };
+}
+
+Deno.test("attach_database PATCHes database_schema_id and records it in state", async () => {
+  const { context, getWrittenResources } = createModelTestContext({
+    globalArgs: args({
+      environmentId: "env-1",
+      databaseSchemaId: "schema-1",
+    }),
+  });
+  await withMockedFetch(
+    [
+      { status: 200, body: {} },
+      {
+        status: 200,
+        body: { data: rawEnvironmentWithDatabase("env-1", "schema-1") },
+      },
+    ],
+    async (calls) => {
+      await model.methods.attach_database.execute({}, context);
+      assertEquals(calls[0].method, "PATCH");
+      assert(calls[0].url.endsWith("/environments/env-1"));
+      assertEquals(calls[0].body, { database_schema_id: "schema-1" });
+    },
+  );
+  const written = getWrittenResources();
+  assertEquals(written[0].specName, "environment");
+  assertEquals(written[0].data.databaseSchemaId, "schema-1");
+});
+
+Deno.test("attach_database requires both the environment and the schema ID", async () => {
+  const noEnv = createModelTestContext({
+    globalArgs: args({ databaseSchemaId: "schema-1" }),
+  });
+  await assertRejects(
+    () => model.methods.attach_database.execute({}, noEnv.context),
+    Error,
+    "environmentId",
+  );
+
+  const noSchema = createModelTestContext({
+    globalArgs: args({ environmentId: "env-1" }),
+  });
+  await assertRejects(
+    () => model.methods.attach_database.execute({}, noSchema.context),
+    Error,
+    "databaseSchemaId",
+  );
+});
+
+Deno.test("detach_database refuses without a matching confirmation", async () => {
+  const { context } = createModelTestContext({
+    globalArgs: args({
+      environmentId: "env-1",
+      confirmEnvironmentId: "env-2",
+    }),
+  });
+  await withMockedFetch([], async (calls) => {
+    await assertRejects(
+      () => model.methods.detach_database.execute({}, context),
+      Error,
+      "Detach refused",
+    );
+    assertEquals(calls.length, 0); // nothing sent
+  });
+});
+
+Deno.test("detach_database sends a null schema when confirmed", async () => {
+  const { context, getWrittenResources } = createModelTestContext({
+    globalArgs: args({
+      environmentId: "env-1",
+      confirmEnvironmentId: "env-1",
+    }),
+  });
+  await withMockedFetch(
+    [
+      { status: 200, body: {} },
+      {
+        status: 200,
+        body: { data: rawEnvironmentWithDatabase("env-1", null) },
+      },
+    ],
+    async (calls) => {
+      await model.methods.detach_database.execute({}, context);
+      assertEquals(calls[0].method, "PATCH");
+      assertEquals(calls[0].body, { database_schema_id: null });
+    },
+  );
+  assertEquals(getWrittenResources()[0].data.databaseSchemaId, null);
 });
 
 // --- stop_environment conditional gate ---

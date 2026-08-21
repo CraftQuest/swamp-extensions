@@ -474,7 +474,7 @@ async function fetchAndWriteInstance(
  */
 export const model = {
   type: "@craftquest/laravel-cloud/queues",
-  version: "2026.08.12.2",
+  version: "2026.08.21.1",
   upgrades: [
     {
       toVersion: "2026.08.10.3",
@@ -515,6 +515,12 @@ export const model = {
       toVersion: "2026.08.12.2",
       description:
         "Background-process requirements documented from live verification — config.connection and config.queue are required, and they do not attach to managed_queue instances; no schema changes",
+      upgradeAttributes: (old: Record<string, unknown>) => old,
+    },
+    {
+      toVersion: "2026.08.21.1",
+      description:
+        "Version bump alongside apps' attach_database / detach_database; no schema changes",
       upgradeAttributes: (old: Record<string, unknown>) => old,
     },
   ],

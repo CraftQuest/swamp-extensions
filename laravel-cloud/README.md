@@ -128,6 +128,7 @@ than one organization? Copy the instance again with a new `name`, a new `id`
 | `run_command`                                                        | Run a shell/artisan command and wait for output (exit code + truncated output stored) |
 | `get_domains` / `create_domain` / `verify_domain` / `delete_domain`  | Custom domain management (delete gated)                                               |
 | `update_app` / `update_environment` / `update_domain` / `get_domain` | Update settings via an `update_payload` JSON object (e.g. php_version, build_command) |
+| `attach_database` / `detach_database`                                | Attach a database schema to an environment by ID, or detach it (detach gated)         |
 | `list_deployments` / `list_commands`                                 | Deployment and command history for an environment                                     |
 | `get_environment_logs`                                               | Recent logs (query/type filters; defaults to the last hour)                           |
 | `get_environment_metrics`                                            | CPU/memory/requests/replica metrics snapshot                                          |

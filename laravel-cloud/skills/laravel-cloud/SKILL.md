@@ -64,6 +64,14 @@ State lives in per-purpose resources — read with
   `wait_deployment` (15-min poll cap per run; re-run to keep waiting). On
   failure the error carries the failure reason and failed-step log tails;
   `get_deployment_logs` stores the full steps.
+- Attach a database: `attach_database` (environmentId +
+  databaseSchemaId) — get the schema ID from lc-data's `list_databases`,
+  never guess it. Don't hand-build an `update_environment` payload for
+  this. A successful attach shows up two ways: `environment.databaseSchemaId`
+  in state, and the deploy command auto-uncommenting to
+  `php artisan migrate --force`. `detach_database` is the reverse and is
+  gated on confirmEnvironmentId — a live app loses its database instantly.
+  Attach BEFORE the first deploy where migrations matter.
 - Env vars: values are SECRETS. `get_environment` stores key names only.
   To set values, the user's values pass through the sensitive
   `env_variables` argument — never echo them back, never store them, and

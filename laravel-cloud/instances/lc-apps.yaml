@@ -23,6 +23,10 @@ inputs:
       type: string
       default: ""
       description: Safety gate for delete_environment / stop_environment (unless already stopped)
+    database_schema_id:
+      type: string
+      default: ""
+      description: Database schema ID for attach_database (from lc-data list_databases)
     deployment_id:
       type: string
       default: ""
@@ -118,6 +122,7 @@ globalArguments:
   confirmAppId: ${{ inputs.confirm_app_id }}
   environmentId: ${{ inputs.environment_id }}
   confirmEnvironmentId: ${{ inputs.confirm_environment_id }}
+  databaseSchemaId: ${{ inputs.database_schema_id }}
   deploymentId: ${{ inputs.deployment_id }}
   appName: ${{ inputs.app_name }}
   repository: ${{ inputs.repository }}
