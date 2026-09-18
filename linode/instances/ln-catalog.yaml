@@ -1,0 +1,10 @@
+type: "@craftquest/linode/catalog"
+typeVersion: 2026.09.18.1
+id: 8d7560b5-03e1-4985-849f-69f1a8ecb249
+name: ln-catalog
+version: 1
+tags:
+  project: linode
+globalArguments:
+  token: ${{ vault.get(linode-secrets, LINODE_TOKEN) }}
+methods: {}

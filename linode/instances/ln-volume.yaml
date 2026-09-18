@@ -1,0 +1,27 @@
+type: "@craftquest/linode/volumes"
+typeVersion: 2026.09.18.1
+id: 5ac5dc71-2a66-4f1f-96f0-b9f5ff8a9fbc
+name: ln-volume
+version: 1
+tags:
+  project: linode
+inputs:
+  properties:
+    label:
+      type: string
+      description: Volume label (1-32 chars); also the state name
+    size:
+      type: integer
+      default: 20
+      description: Size in GB
+    region:
+      type: string
+      default: "us-east"
+      description: Region ID (must match the Linode it will attach to)
+  required: [label]
+globalArguments:
+  token: ${{ vault.get(linode-secrets, LINODE_TOKEN) }}
+  label: ${{ inputs.label }}
+  size: ${{ inputs.size }}
+  region: ${{ inputs.region }}
+methods: {}

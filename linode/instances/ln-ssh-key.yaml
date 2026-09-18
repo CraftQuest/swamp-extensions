@@ -1,0 +1,21 @@
+type: "@craftquest/linode/ssh_keys"
+typeVersion: 2026.09.18.1
+id: 50f06337-c02b-47ce-aa6d-3946a01811d9
+name: ln-ssh-key
+version: 1
+tags:
+  project: linode
+inputs:
+  properties:
+    label:
+      type: string
+      description: Key label; also the state name
+    ssh_key:
+      type: string
+      description: Public key text (ssh-ed25519 ... or ssh-rsa ...)
+  required: [label, ssh_key]
+globalArguments:
+  token: ${{ vault.get(linode-secrets, LINODE_TOKEN) }}
+  label: ${{ inputs.label }}
+  ssh_key: ${{ inputs.ssh_key }}
+methods: {}

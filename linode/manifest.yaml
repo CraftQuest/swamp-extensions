@@ -1,0 +1,34 @@
+manifestVersion: 1
+name: "@craftquest/linode"
+version: "2026.09.18.1"
+repository: "https://github.com/CraftQuest/swamp-extensions"
+description: "Provision and operate Linode (Akamai) infrastructure from swamp — compute instances with boot/shutdown/reboot/wait, Cloud Firewalls with rule and device management, Block Storage volumes with attach/detach/resize, profile SSH keys, and a regions/types/images catalog with pricing. Label-addressed state, idempotent create and delete, confirmation-gated instance and volume deletes. Pure HTTPS, token from your vault."
+paths:
+  base: manifest
+models:
+  - instances.ts
+  - firewalls.ts
+  - volumes.ts
+  - ssh_keys.ts
+  - catalog.ts
+skills:
+  - linode
+additionalFiles:
+  - README.md
+  - LICENSE.md
+  - instances/ln-instance.yaml
+  - instances/ln-firewall.yaml
+  - instances/ln-volume.yaml
+  - instances/ln-ssh-key.yaml
+  - instances/ln-catalog.yaml
+platforms:
+  - darwin-aarch64
+  - darwin-x86_64
+  - linux-x86_64
+  - linux-aarch64
+labels:
+  - linode
+  - akamai
+  - cloud
+  - infrastructure
+  - provisioning

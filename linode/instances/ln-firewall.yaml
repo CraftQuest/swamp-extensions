@@ -1,0 +1,48 @@
+type: "@craftquest/linode/firewalls"
+typeVersion: 2026.09.18.1
+id: 31b3dc5f-6c24-44c8-83a9-929cdea86a5c
+name: ln-firewall
+version: 1
+tags:
+  project: linode
+inputs:
+  properties:
+    label:
+      type: string
+      description: Firewall label (3-32 chars); also the state name
+    linodes:
+      type: array
+      items:
+        type: integer
+      default: []
+      description: Linode instance IDs to attach at creation
+  required: [label]
+globalArguments:
+  token: ${{ vault.get(linode-secrets, LINODE_TOKEN) }}
+  label: ${{ inputs.label }}
+  linodes: ${{ inputs.linodes }}
+  inbound_policy: DROP
+  outbound_policy: ACCEPT
+  inbound:
+    - action: ACCEPT
+      protocol: TCP
+      ports: "22"
+      addresses:
+        ipv4: ["0.0.0.0/0"]
+        ipv6: ["::/0"]
+      label: allow-ssh
+    - action: ACCEPT
+      protocol: TCP
+      ports: "80,443"
+      addresses:
+        ipv4: ["0.0.0.0/0"]
+        ipv6: ["::/0"]
+      label: allow-web
+    - action: ACCEPT
+      protocol: ICMP
+      addresses:
+        ipv4: ["0.0.0.0/0"]
+        ipv6: ["::/0"]
+      label: allow-ping
+  outbound: []
+methods: {}

@@ -1,0 +1,51 @@
+type: "@craftquest/linode/instances"
+typeVersion: 2026.09.18.1
+id: 89c7fd0d-1d40-4557-9493-8c863ff27781
+name: ln-instance
+version: 1
+tags:
+  project: linode
+inputs:
+  properties:
+    label:
+      type: string
+      description: Instance label (unique on the account); also the state name
+    region:
+      type: string
+      default: "us-east"
+      description: Region ID (see ln-catalog list_regions)
+    type:
+      type: string
+      default: "g6-nanode-1"
+      description: Plan ID (see ln-catalog list_types)
+    image:
+      type: string
+      default: "linode/ubuntu24.04"
+      description: Image ID (see ln-catalog list_images)
+    authorized_keys:
+      type: array
+      items:
+        type: string
+      default: []
+      description: Public SSH keys installed for root
+    tags:
+      type: array
+      items:
+        type: string
+      default: []
+      description: Tags applied to the instance
+    user_data:
+      type: string
+      default: ""
+      description: cloud-init user data (plain text)
+  required: [label]
+globalArguments:
+  token: ${{ vault.get(linode-secrets, LINODE_TOKEN) }}
+  label: ${{ inputs.label }}
+  region: ${{ inputs.region }}
+  type: ${{ inputs.type }}
+  image: ${{ inputs.image }}
+  authorized_keys: ${{ inputs.authorized_keys }}
+  tags: ${{ inputs.tags }}
+  user_data: ${{ inputs.user_data }}
+methods: {}
