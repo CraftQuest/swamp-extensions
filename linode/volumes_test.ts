@@ -51,10 +51,31 @@ Deno.test("attach, detach and resize act on the stored volume", async () => {
     assertEquals(calls[0].body, { linode_id: 123, persist_across_boots: true });
     assertEquals(out.result, { status: "active", linodeId: 123 });
   });
-  await withMockedFetch([{ status: 200, body: {} }, { status: 200, body: rawVolume() }], async (calls) => {
-    await model.methods.detach.execute({}, context);
-    assertEquals(calls[0].path, "/volumes/77/detach");
-  });
+  // detach polls until linode_id clears (Linode detaches asynchronously)
+  await withMockedFetch(
+    [
+      { status: 200, body: {} },
+      { status: 200, body: rawVolume({ linode_id: 123 }) },
+      { status: 200, body: rawVolume({ linode_id: null }) },
+      { status: 200, body: rawVolume({ linode_id: null }) },
+    ],
+    async (calls) => {
+      const out = await model.methods.detach.execute({ timeout_seconds: 60 }, context);
+      assertEquals(calls[0].path, "/volumes/77/detach");
+      assertEquals(calls.length, 4);
+      assertEquals(out.result, { status: "active", linodeId: null });
+    },
+  );
+  await withMockedFetch(
+    [{ status: 200, body: {} }, { status: 200, body: rawVolume({ linode_id: 123 }) }],
+    async () => {
+      await assertRejects(
+        () => model.methods.detach.execute({ timeout_seconds: 0 }, context),
+        Error,
+        "still attached",
+      );
+    },
+  );
   await assertRejects(() => model.methods.resize.execute({ size: 20 }, context), Error, "only grows");
   await withMockedFetch([{ status: 200, body: {} }, { status: 200, body: rawVolume({ size: 40, status: "resizing" }) }], async (calls) => {
     await model.methods.resize.execute({ size: 40 }, context);

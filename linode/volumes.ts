@@ -10,6 +10,7 @@ import { z } from "npm:zod@4";
 import {
   compact,
   instanceName,
+  internals,
   type Json,
   request,
   waitForStatus,
@@ -136,6 +137,11 @@ const AttachArgs = z.object({
   config_id: z.number().int().optional(),
   persist_across_boots: z.boolean().default(true),
 });
+const DetachArgs = z.object({
+  timeout_seconds: z.number().int().positive().default(120).describe(
+    "How long to wait for Linode to finish detaching",
+  ),
+});
 const ResizeArgs = z.object({
   size: z.number().int().positive().describe(
     "New size in GB; must be larger than the current size",
@@ -231,10 +237,10 @@ export const model = {
     },
     detach: {
       description:
-        "Detach the stored volume from whatever Linode it is attached to (no-op if detached)",
-      arguments: z.object({}),
+        "Detach the stored volume from whatever Linode it is attached to and wait until Linode reports it free (no-op if detached)",
+      arguments: DetachArgs,
       execute: async (
-        _args: Record<string, never>,
+        args: z.infer<typeof DetachArgs>,
         ctx: Ctx,
       ): Promise<MethodResult> => {
         const stored = await readStoredState(ctx, "volume");
@@ -244,6 +250,24 @@ export const model = {
           body: {},
           signal: ctx.signal,
         });
+        // Linode detaches asynchronously: status stays "active" while
+        // linode_id is still set. Poll until it clears so a following
+        // delete does not fail with "must be detached".
+        const started = Date.now();
+        for (;;) {
+          const raw = await request("GET", `${ENDPOINT}/${stored.id}`, {
+            token: tokenOf(ctx),
+            signal: ctx.signal,
+          });
+          if (!raw) throw new Error(`Volume ${stored.id} not found`);
+          if (raw.linode_id === null || raw.linode_id === undefined) break;
+          if (Date.now() - started >= args.timeout_seconds * 1000) {
+            throw new Error(
+              `Volume ${stored.id} still attached to Linode ${raw.linode_id} after ${args.timeout_seconds}s`,
+            );
+          }
+          await internals.sleep(3000);
+        }
         return refresh(ctx, stored.id);
       },
     },
